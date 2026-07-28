@@ -126,7 +126,7 @@
                         </div>
                         <div class="col-md-6">
                             <div class="form-check mt-3">
-                                <input class="form-check-input" type="checkbox" id="editPersistEnabled">
+                                <input class="form-check-input" type="checkbox" id="editPersistEnabled" onclick="return checkPersistEnabled(this)">
                                 <label class="form-check-label small" for="editPersistEnabled">持久化错误日志</label>
                             </div>
                         </div>
@@ -210,6 +210,7 @@
 let serverList = {{ servers|tojson }};
 const querySets = {{ query_sets|tojson }};
 const osCheckLabels = {{ os_check_labels|tojson }};
+const logEnabled = {{ log_enabled|tojson }};
 {% raw %}
 
 function filterTable() {
@@ -220,10 +221,20 @@ function filterTable() {
     });
 }
 
+function checkPersistEnabled(cb) {
+    if (!logEnabled && cb.checked) {
+        cb.checked = false;
+        Swal.fire({icon:'warning',title:'功能未启用',text:'全局日志持久化未启用，请先在系统配置中开启"启用日志持久化"。', confirmButtonText:'知道了'});
+        return false;
+    }
+    return true;
+}
+
 document.querySelectorAll('.edit-cat-check, .edit-os-check').forEach(cb => {
     cb.addEventListener('change', () => { toggleEditDbConfig(); syncCheckAll('edit'); });
 });
 
+// 数据库字段根据勾选显示
 function hasEditDbCategory() {
     const cats = document.querySelectorAll('.edit-cat-check:checked').length > 0;
     const dbOs = document.getElementById('edit-os-install_path')?.checked || document.getElementById('edit-os-db_log_errors')?.checked;
@@ -334,6 +345,20 @@ async function saveEdit() {
 }
 
 async function testEditConnection() {
+    // 先验证必填项
+    const fields = [
+        {id:'editSshHost', label:'远程主机'},
+        {id:'editSshPort', label:'远程端口'},
+        {id:'editSshUser', label:'登录用户'},
+        {id:'editSshPass', label:'登录密码'},
+    ];
+    if (hasEditDbCategory()) {
+        fields.push({id:'editDbHost', label:'数据库主机'}, {id:'editDbPort', label:'数据库端口'},
+            {id:'editDbUser', label:'数据库用户'}, {id:'editDbPass', label:'数据库密码'},
+            {id:'editDbName', label:'数据库名'}, {id:'editIsqlCmd', label:'isql命令路径'});
+    }
+    if (!validateRequired(fields)) return;
+
     const btn = document.getElementById('editTestResult');
     btn.innerHTML = '<span class="text-warning small"><i class="bi bi-hourglass-split"></i> 测试中...</span>';
     const data = {

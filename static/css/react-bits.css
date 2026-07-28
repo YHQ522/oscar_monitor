@@ -1,0 +1,146 @@
+/* ── React Bits Animations — adapted for oscar_monitor ─── */
+/* Source: github.com/DavidHDev/react-bits (MIT)              */
+
+/* ═══════════════════════════════════════════════════════════ */
+/* 1. Glare Hover — 光泽悬停效果                              */
+/* ═══════════════════════════════════════════════════════════ */
+.glare-hover {
+  overflow: hidden;
+  position: relative;
+}
+
+.glare-hover::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    120deg,
+    hsla(0, 0%, 100%, 0) 40%,
+    hsla(0, 0%, 100%, 0.12) 50%,
+    hsla(0, 0%, 100%, 0) 60%
+  );
+  transition: 0.6s ease;
+  background-size: 200% 200%;
+  background-position: -100% 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.glare-hover:hover::before {
+  background-position: 100% 0;
+}
+
+/* ═══════════════════════════════════════════════════════════ */
+/* 2. Shimmer Text — 闪光文字效果                              */
+/* ═══════════════════════════════════════════════════════════ */
+.shimmer-text {
+  background: linear-gradient(
+    90deg,
+    currentColor 0%,
+    currentColor 40%,
+    rgba(255, 255, 255, 0.6) 50%,
+    currentColor 60%,
+    currentColor 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 2.5s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0%, 100% { background-position: 200% 0; }
+  50% { background-position: -200% 0; }
+}
+
+/* ═══════════════════════════════════════════════════════════ */
+/* 3. Pulse Glow — 脉冲发光（用于状态指示器）                  */
+/* ═══════════════════════════════════════════════════════════ */
+.pulse-glow {
+  animation: pulseGlow 2s ease-in-out infinite;
+}
+
+.pulse-glow-fast {
+  animation: pulseGlow 1s ease-in-out infinite;
+}
+
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 4px rgba(162, 7, 7, 0.3); }
+  50% { box-shadow: 0 0 16px rgba(162, 7, 7, 0.6); }
+}
+
+/* ═══════════════════════════════════════════════════════════ */
+/* 4. Float — 浮动悬浮效果                                     */
+/* ═══════════════════════════════════════════════════════════ */
+.float-anim {
+  animation: float 3s ease-in-out infinite;
+}
+
+.float-anim-slow {
+  animation: float 5s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-6px); }
+}
+
+/* ═══════════════════════════════════════════════════════════ */
+/* 5. Gradient Border — 渐变边框流动                            */
+/* ═══════════════════════════════════════════════════════════ */
+.gradient-border {
+  position: relative;
+  border-radius: var(--radius, 12px);
+}
+
+.gradient-border::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  background: linear-gradient(
+    135deg,
+    #1E3A5F, #2563EB, #A16207, #1E3A5F
+  );
+  background-size: 300% 300%;
+  animation: gradientBorder 4s ease infinite;
+  z-index: -1;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.gradient-border:hover::before {
+  opacity: 1;
+}
+
+@keyframes gradientBorder {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* ═══════════════════════════════════════════════════════════ */
+/* 6. Fade Slide Up — 淡入上滑（页面上所有卡片自动应用）       */
+/* ═══════════════════════════════════════════════════════════ */
+.fade-slide-up {
+  opacity: 0;
+  transform: translateY(20px);
+  animation: fadeSlideUp 0.6s ease-out forwards;
+}
+
+.fade-slide-up-delay-1 { animation-delay: 0.1s; }
+.fade-slide-up-delay-2 { animation-delay: 0.2s; }
+.fade-slide-up-delay-3 { animation-delay: 0.3s; }
+.fade-slide-up-delay-4 { animation-delay: 0.4s; }
+
+@keyframes fadeSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

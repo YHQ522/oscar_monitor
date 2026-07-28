@@ -107,6 +107,11 @@
                 <p class="mt-2">请选择左侧采集选项或点击"全部采集"获取数据</p>
             </div>
         </div>
+
+        <div class="card mt-3" id="trendPanel" style="display:none;">
+            <div class="card-header py-1"><i class="bi bi-graph-up"></i> <strong>趋势图 (最近30分钟)</strong></div>
+            <div class="card-body p-2"><canvas id="trendChart" style="width:100%;height:240px;"></canvas></div>
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -380,6 +385,7 @@ async function collectAll() {
         } else {
             document.getElementById('dataContainer').innerHTML = renderResults(data);
             showStatus('采集完成 - ' + data.timestamp, 'success');
+            loadTrends();
         }
     } catch (e) {
         showStatus(e.message, 'error');
@@ -453,6 +459,43 @@ async function appControl(serverId, appName, action) {
     } catch (e) {
         showStatus(e.message, 'error');
     }
+}
+
+// ── CSV export ─────────────────────────────────────────
+function exportCSV() {
+    window.open('/api/servers/' + SERVER_ID + '/export', '_blank');
+}
+
+// ── Chart.js trend ────────────────────────────────────
+let trendChart = null;
+async function loadTrends() {
+    try {
+        const data = await apiFetch('/api/trends/' + SERVER_ID);
+        if (!data || data.length < 2) return;
+        document.getElementById('trendPanel').style.display = '';
+        const labels = data.map(p => p.ts).slice(-15);
+        const sessions = data.map(p => p.sessions || 0).slice(-15);
+        if (trendChart) trendChart.destroy();
+        const ctx = document.getElementById('trendChart').getContext('2d');
+        trendChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: '连接数', data: sessions,
+                    backgroundColor: '#1E3A5F',
+                    borderColor: '#A16207',
+                    borderWidth: 1,
+                    borderRadius: 4
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: { y: { beginAtZero: true } }
+            }
+        });
+    } catch(e) {}
 }
 {% endraw %}
 </script>

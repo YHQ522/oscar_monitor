@@ -257,6 +257,7 @@ def servers_page():
         servers = load_servers()
         return render_template('servers.html', servers=servers,
                                query_sets=QUERY_SETS, os_check_labels=OS_CHECK_LABELS,
+                               log_enabled=load_config().get('log_enabled', False),
                                **template_context())
     except Exception as e:
         return f"<pre>服务管理页渲染错误:\n{traceback.format_exc()}</pre>", 500
@@ -269,6 +270,7 @@ def servers_add():
     try:
         return render_template('servers_add.html',
                                query_sets=QUERY_SETS, os_check_labels=OS_CHECK_LABELS,
+                               log_enabled=load_config().get('log_enabled', False),
                                **template_context())
     except Exception as e:
         return f"<pre>添加服务器页渲染错误:\n{traceback.format_exc()}</pre>", 500
@@ -382,6 +384,8 @@ def api_add_server():
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"error": "无效的请求数据"}), 400
+    if data.get('persist_enabled') and not load_config().get('log_enabled'):
+        return jsonify({"error": "全局日志持久化未启用，请先在系统配置中启用"}), 400
     servers = load_servers()
     data['id'] = uuid.uuid4().hex[:8]
     if 'enabled_categories' not in data:
@@ -401,6 +405,8 @@ def api_update_server(server_id):
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"error": "无效的请求数据"}), 400
+    if data.get('persist_enabled') and not load_config().get('log_enabled'):
+        return jsonify({"error": "全局日志持久化未启用，请先在系统配置中启用"}), 400
     servers = load_servers()
     for s in servers:
         if s.get('id') == server_id:

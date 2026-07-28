@@ -2,7 +2,7 @@
 {% block title %}全局监控 - 管控平台{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h4><i class="bi bi-speedometer2"></i> 服务概览</h4>
+    <h4><i class="bi bi-speedometer2"></i> <span class="shimmer-text">服务概览</span></h4>
     <div class="d-flex align-items-center gap-2 flex-nowrap">
         <input type="text" class="form-control form-control-sm search-box" id="searchBox" placeholder="搜索..." oninput="filterCards()">
         <button class="btn btn-outline-success btn-sm flex-shrink-0" disabled>
@@ -22,10 +22,18 @@
     {% endif %}
 </div>
 {% else %}
+<!-- 全局摘要 -->
+<div class="row g-2 mb-3" id="globalSummary" style="display:none;">
+    <div class="col-6 col-md-3"><div class="card text-bg-primary fade-slide-up"><div class="card-body p-2 text-center"><h5 class="mb-0" id="sumOnline">0</h5><small>在线服务</small></div></div></div>
+    <div class="col-6 col-md-3"><div class="card text-bg-success fade-slide-up fade-slide-up-delay-1"><div class="card-body p-2 text-center"><h5 class="mb-0" id="sumSessions">0</h5><small>总连接数</small></div></div></div>
+    <div class="col-6 col-md-3"><div class="card text-bg-warning fade-slide-up fade-slide-up-delay-2 pulse-glow"><div class="card-body p-2 text-center"><h5 class="mb-0" id="sumDeadlocks">0</h5><small>死锁数</small></div></div></div>
+    <div class="col-6 col-md-3"><div class="card text-bg-danger fade-slide-up fade-slide-up-delay-3"><div class="card-body p-2 text-center"><h5 class="mb-0" id="sumAlerts">0</h5><small>告警</small></div></div></div>
+</div>
+
 <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3" id="serverCards">
     {% for s in servers %}
     <div class="col">
-        <div class="card server-card h-100" id="card-{{ s.id }}" data-search="{{ s.name }} {{ s.ssh_host }} {{ s.db_host }} {{ s.db_name }} {{ s.db_user }}">
+        <div class="card server-card h-100 glare-hover" id="card-{{ s.id }}" data-search="{{ s.name }} {{ s.ssh_host }} {{ s.db_host }} {{ s.db_name }} {{ s.db_user }}">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-server"></i> <strong>{{ s.name or s.ssh_host }}</strong></span>
                 <span class="badge bg-secondary status-badge" id="status-{{ s.id }}">待采集</span>
@@ -343,7 +351,10 @@ function filterCards() {
     });
 }
 
-connectStream();
+// SSE 延迟启动，避免浏览器标签页一直显示加载中
+window.addEventListener('load', function() {
+    setTimeout(connectStream, 500);
+});
 refreshAll();
 </script>
 {% endblock %}
