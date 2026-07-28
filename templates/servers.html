@@ -224,7 +224,7 @@ function filterTable() {
 function checkPersistEnabled(cb) {
     if (!logEnabled && cb.checked) {
         cb.checked = false;
-        Swal.fire({...SWAL_BASE, icon:'info', title:'功能未启用', html:'<div class="swal-msg">全局日志持久化未启用，请先在系统配置中开启"启用日志持久化"。</div>', confirmButtonText:'知道了'});
+        swalInfo('全局日志持久化未启用，请先在系统配置中开启"启用日志持久化"。', '功能未启用');
         return false;
     }
     return true;

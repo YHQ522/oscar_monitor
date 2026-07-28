@@ -2,10 +2,16 @@ import json
 import os
 import sys
 import threading
-import random
+import uuid
+import platform
 import shlex
 import subprocess
 from collector import _ssh_connect, _ssh_exec
+
+
+def _safe_str(v, maxlen=1000):
+    """SQL 安全转义：替换单引号并截断"""
+    return (str(v or '')).replace("'", "''")[:maxlen]
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
@@ -59,9 +65,10 @@ def save_config(cfg):
 
 
 def _temp_sql():
+    uid = uuid.uuid4().hex[:8]
     if os.name == 'nt':
-        return os.path.join(os.environ.get('TEMP', 'C:/Windows/Temp'), f'oscar_p_{random.randint(10000, 99999)}.sql').replace('\\', '/')
-    return f'/tmp/oscar_p_{random.randint(10000, 99999)}.sql'
+        return os.path.join(os.environ.get('TEMP', 'C:/Windows/Temp'), f'oscar_p_{uid}.sql').replace('\\', '/')
+    return f'/tmp/oscar_p_{uid}.sql'
 
 
 def _build_sql(db_cfg, sql_file, sql):
@@ -88,7 +95,6 @@ def _exec_sql(db_cfg, sql):
             client.close()
     else:
         # 本地执行：用 Python 写 SQL 文件，再用 isql 执行（兼容 Windows/Linux）
-        import platform
         try:
             with open(sql_file, 'w', encoding='utf-8') as f:
                 f.write(sql)
@@ -183,14 +189,13 @@ def persist_db_error(server_name, log_entry):
         if not _ensure_table(db):
             return
 
-    safe = lambda v: (v or '').replace("'", "''")[:1000]
-    sname = safe(server_name)
-    msg = safe(log_entry.get('msg', ''))
-    euser = safe(log_entry.get('user', ''))
-    etool = safe(log_entry.get('tool', ''))
-    esql = safe(log_entry.get('sql', ''))
+    sname = _safe_str(server_name)
+    msg = _safe_str(log_entry.get('msg', ''))
+    euser = _safe_str(log_entry.get('user', ''))
+    etool = _safe_str(log_entry.get('tool', ''))
+    esql = _safe_str(log_entry.get('sql', ''))
     cost = log_entry.get('cost', 0) or 0
-    otime = safe(log_entry.get('time', ''))
+    otime = _safe_str(log_entry.get('time', ''))
 
     _exec_sql(db, f"""
 insert into oscar_log_collect (server_name, check_type, error_msg, occur_time, exec_user, exec_tool, exec_sql, cost_seconds)
@@ -214,9 +219,8 @@ def persist_slow_sql(server_name, sql_entry):
         if not _ensure_table(db):
             return
 
-    safe = lambda v: (v or '').replace("'", "''")[:1000]
-    sname = safe(server_name)
-    msg = safe(sql_entry.get('sql', ''))[:800]
+    sname = _safe_str(server_name)
+    msg = _safe_str(sql_entry.get('sql', ''), 800)
     cost = float(sql_entry.get('cost', 0) or 0)
 
     _exec_sql(db, f"""
@@ -234,14 +238,14 @@ where server_name='{sname}' and check_type='slow_sql' and error_msg='{msg}';
 def persist_os_error(server_name, check_type, error_msg):
     cfg = load_config()
     db = cfg.get('log_db', {})
-    if not db.get('enabled') or not error_msg or not error_msg.strip():
+    if not cfg.get('log_enabled') or not error_msg or not error_msg.strip():
         return
     with _lock:
         if not _ensure_table(db):
             return
-    safe_msg = error_msg[:500].replace("'", "''")
-    safe_server = (server_name or '').replace("'", "''")
-    safe_type = (check_type or '').replace("'", "''")
+    safe_msg = _safe_str(error_msg, 500)
+    safe_server = _safe_str(server_name)
+    safe_type = _safe_str(check_type)
     _exec_sql(db, f"""
 insert into oscar_log_collect (server_name, check_type, error_msg)
 select '{safe_server}', '{safe_type}', '{safe_msg}'

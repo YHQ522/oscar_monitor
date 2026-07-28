@@ -135,46 +135,47 @@ h1,h2,h3,h4,h5,h6,.navbar-brand,strong,.card-header {
 }
 
 /* ═══════════════════════════════════════════════
-   SweetAlert2 弹窗美化
+   SweetAlert2 弹窗美化 (紧凑版)
    ═══════════════════════════════════════════════ */
 .swal-popup {
-    border-radius: 16px !important;
-    box-shadow: 0 20px 60px rgba(15,23,42,0.25) !important;
-    padding: 2rem 1.8rem 1.5rem !important;
+    border-radius: 12px !important;
+    box-shadow: 0 12px 40px rgba(15,23,42,0.22) !important;
+    padding: 1.4rem 1.4rem 1.1rem !important;
     background: #fff !important;
+    width: 28em !important;
 }
 .swal-title {
-    font-size: 1.2rem !important;
+    font-size: 1.05rem !important;
     font-weight: 700 !important;
     color: #1E3A5F !important;
-    padding-top: 0.5rem !important;
+    padding-top: 0.3rem !important;
 }
 .swal-text {
-    font-size: 0.92rem !important;
+    font-size: 0.85rem !important;
     color: #475569 !important;
-    line-height: 1.6 !important;
+    line-height: 1.5 !important;
 }
 .swal-msg {
-    font-size: 0.9rem;
+    font-size: 0.82rem;
     color: #475569;
     word-break: break-word;
-    max-height: 200px;
+    max-height: 160px;
     overflow-y: auto;
-    text-align: left;
-    padding: 0 0.5rem;
+    text-align: center;
+    padding: 0 0.3rem;
 }
 .swal-btn {
-    border-radius: 8px !important;
+    border-radius: 6px !important;
     font-weight: 600 !important;
-    font-size: 0.88rem !important;
-    padding: 0.5rem 1.6rem !important;
+    font-size: 0.82rem !important;
+    padding: 0.4rem 1.2rem !important;
     transition: all 0.25s ease !important;
     border: none !important;
     outline: none !important;
 }
 .swal-btn:hover {
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    box-shadow: 0 3px 10px rgba(0,0,0,0.13);
 }
 .swal-btn-confirm {
     background: linear-gradient(135deg, #1E3A5F, #2A5080) !important;
@@ -191,15 +192,14 @@ h1,h2,h3,h4,h5,h6,.navbar-brand,strong,.card-header {
     background: linear-gradient(135deg, #dc2626, #ef4444) !important;
     color: #fff !important;
 }
-/* 弹窗图标微调 */
 .swal2-icon {
-    margin: 0.5rem auto 0.8rem !important;
+    margin: 0.2rem auto 0.5rem !important;
+    transform: scale(0.82);
 }
 .swal2-actions {
-    gap: 0.6rem;
-    margin-top: 1.2rem !important;
+    gap: 0.5rem;
+    margin-top: 0.8rem !important;
 }
-/* 背景遮罩 */
 .swal2-backdrop-show {
     backdrop-filter: blur(2px);
     background: rgba(15,23,42,0.5) !important;

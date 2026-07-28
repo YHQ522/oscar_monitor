@@ -75,6 +75,16 @@ function swalDanger(msg, title) {
         customClass: { ...SWAL_BASE.customClass, confirmButton: 'swal-btn swal-btn-confirm swal-btn-danger' },
     });
 }
+function swalInfo(msg, title) {
+    return Swal.fire({
+        ...SWAL_BASE,
+        icon: 'info',
+        title: title || '提示',
+        html: `<div class="swal-msg">${escapeHtml(msg)}</div>`,
+        confirmButtonText: '知道了',
+        iconColor: '#1E3A5F',
+    });
+}
 
 async function apiFetch(url, options) {
     const resp = await fetch(url, options);
@@ -147,11 +157,12 @@ function validateRequired(fields) {
         const val = (el.value || '').trim();
         if (!val) {
             Swal.fire({
+                ...SWAL_BASE,
                 icon: 'warning',
                 title: '必填项未填写',
-                html: `<span style="font-size:0.95rem;">请填写 <strong style="color:#d63384;">${f.label}</strong></span>`,
+                html: `<div class="swal-msg">请填写 <strong style="color:#d63384;">${escapeHtml(f.label)}</strong></div>`,
                 confirmButtonText: '知道了',
-                confirmButtonColor: '#1E3A5F',
+                iconColor: '#d63384',
                 didClose: () => { el.focus(); el.classList.add('is-invalid'); setTimeout(() => el.classList.remove('is-invalid'), 2000); }
             });
             return false;

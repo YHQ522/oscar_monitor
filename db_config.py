@@ -1,7 +1,9 @@
 import json
 import uuid
+import subprocess
 import threading
-from persist import load_config as load_global_config, _exec_sql, _get_table_columns
+from persist import load_config as load_global_config, _exec_sql, _get_table_columns, _temp_sql, _build_sql
+from collector import _ssh_connect, _ssh_exec
 
 _lock = threading.Lock()
 
@@ -92,11 +94,8 @@ def load_servers_from_db():
     db = _cfg()
     try:
         # Execute query and parse
-        import persist
-        sql_file = persist._temp_sql()
-        cmd = persist._build_sql(db, sql_file, "select * from " + SERVERS_TABLE + " order by created_at;")
-        import subprocess
-        from collector import _ssh_connect, _ssh_exec
+        sql_file = _temp_sql()
+        cmd = _build_sql(db, sql_file, "select * from " + SERVERS_TABLE + " order by created_at;")
         ssh_host = db.get('ssh_host', '')
         if ssh_host and ssh_host not in ('127.0.0.1', 'localhost'):
             client = _ssh_connect({

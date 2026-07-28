@@ -1,8 +1,13 @@
 import os
 import sys
 import json
+import time
 import hashlib
 import secrets
+import subprocess
+from collector import _ssh_connect, _ssh_exec
+from persist import load_config as persist_load_config, _temp_sql, _build_sql
+from db_config import sync_users_to_db
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
@@ -50,12 +55,13 @@ def _needs_upgrade(stored):
 
 
 _users_cache = None
+_users_cache_time = 0
 _migrated = False
 
 
 def load_users():
-    global _users_cache, _migrated
-    if _users_cache is not None:
+    global _users_cache, _users_cache_time, _migrated
+    if _users_cache is not None and time.time() - _users_cache_time < 60:
         return _users_cache
     if not os.path.exists(USER_FILE):
         default = [{
@@ -66,6 +72,7 @@ def load_users():
         }]
         save_users(default)
         _users_cache = default
+        _users_cache_time = time.time()
         _migrated = True
         return default
     users = _load_json()
@@ -116,8 +123,9 @@ def _load_json():
 
 
 def save_users(users):
-    global _users_cache
+    global _users_cache, _users_cache_time
     _users_cache = users
+    _users_cache_time = time.time()
     os.makedirs(os.path.dirname(USER_FILE), exist_ok=True)
     with open(USER_FILE, 'w', encoding='utf-8') as f:
         json.dump(users, f, ensure_ascii=False, indent=2)
@@ -199,7 +207,6 @@ def has_permission(user, perm):
 
 def _sync_to_db(users):
     try:
-        from db_config import sync_users_to_db
         sync_users_to_db(users)
     except Exception:
         pass
@@ -207,16 +214,12 @@ def _sync_to_db(users):
 
 def _db_has_users():
     try:
-        from persist import load_config as pcfg
-        cfg = pcfg()
+        cfg = persist_load_config()
         if not cfg.get('server_db_enabled'):
             return False
-        import persist
         db = cfg.get('log_db', {})
-        sql_file = persist._temp_sql()
-        cmd = persist._build_sql(db, sql_file, "select count(*) from OSCAR_USERS;")
-        import subprocess
-        from collector import _ssh_connect, _ssh_exec
+        sql_file = _temp_sql()
+        cmd = _build_sql(db, sql_file, "select count(*) from OSCAR_USERS;")
         ssh_host = db.get('ssh_host', '')
         if ssh_host and ssh_host not in ('127.0.0.1', 'localhost'):
             client = _ssh_connect({'ssh_host': ssh_host, 'ssh_port': db.get('ssh_port', 22),

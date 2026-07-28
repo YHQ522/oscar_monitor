@@ -27,22 +27,33 @@ app.config['PERMANENT_SESSION_LIFETIME'] = 1800
 
 scheduler = None
 _collect_executor = None
+_persist_executor = None
 
 
 def _get_executor():
     global _collect_executor
     if _collect_executor is None:
         cfg = load_config()
-        workers = max(1, min(50, cfg.get('collect_workers', 8)))
+        workers = max(1, min(20, cfg.get('collect_workers', 8)))
         _collect_executor = ThreadPoolExecutor(max_workers=workers)
     return _collect_executor
 
 
+def _get_persist_executor():
+    global _persist_executor
+    if _persist_executor is None:
+        _persist_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix='persist')
+    return _persist_executor
+
+
 def _reinit_executor():
-    global _collect_executor
+    global _collect_executor, _persist_executor
     if _collect_executor:
         _collect_executor.shutdown(wait=False)
     _collect_executor = None
+    if _persist_executor:
+        _persist_executor.shutdown(wait=False)
+    _persist_executor = None
 
 
 try:
@@ -193,22 +204,23 @@ def refresh_session_user():
                 return jsonify({"error": "会话已过期", "redirect": url_for('login')}), 401
             return redirect(url_for('login'))
         session['last_activity'] = now
-        user = session.get('user', {})
-        if not user.get('perms') or 'servers' in user.get('perms', []) or 'control' in user.get('perms', []):
+        # 仅每 30 秒刷新一次用户权限（auth.load_users 内部有 60 秒缓存兜底）
+        if now - session.get('_user_refresh', 0) > 30:
             try:
                 from auth import load_users as reload_users
                 current = next((u for u in reload_users() if u.get('username') == session.get('username')), None)
                 if current:
                     session['user'] = current
+                    session['_user_refresh'] = now
             except Exception:
                 pass
 
 
 @app.errorhandler(500)
 def internal_error(e):
-    import traceback
-    tb = traceback.format_exc()
-    return f"<h2>500 内部错误</h2><pre>{tb}</pre>", 500
+    import logging
+    logging.getLogger('oscar_monitor').error(f"500 Internal Server Error: {traceback.format_exc()}")
+    return "<h2>500 内部服务器错误</h2><p>服务器遇到错误，请稍后重试或联系管理员。</p>", 500
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -571,11 +583,10 @@ def api_update_config():
         cfg['server_db_enabled'] = data['server_db_enabled']
     save_config(cfg)
     _reinit_executor()
-    from auth import load_users as auth_users
-    auth_users.cache_clear() if hasattr(auth_users, 'cache_clear') else None
+    # 使 auth 用户缓存失效（下次请求自动刷新）
     import auth
     auth._users_cache = None
-    auth.load_users()
+    auth._users_cache_time = 0
     return jsonify({"status": "ok"})
 
 
@@ -683,8 +694,6 @@ def api_stream():
 
 
 @app.route('/api/trends/<server_id>')
-
-
 @login_required
 def api_trends(server_id):
     """返回最近采集趋势数据（连接数变化）"""
@@ -790,8 +799,7 @@ def _collect_one(server):
 def _persist_errors(server, result):
     if not server.get('persist_enabled'):
         return
-    t = threading.Thread(target=_do_persist, args=(server, result), daemon=True)
-    t.start()
+    _get_persist_executor().submit(_do_persist, server, result)
 
 
 def _do_persist(server, result):

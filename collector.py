@@ -1,8 +1,8 @@
 import paramiko
 import re
 import time
+import uuid
 import shlex
-import random
 import subprocess
 
 QUERY_SETS = {
@@ -207,17 +207,13 @@ def _need_ssh(server_config):
     return bool(host and host not in ('127.0.0.1', 'localhost'))
 
 
-def _get_os_type(server_config):
-    return server_config.get('os_type', 'linux')
-
-
 def _is_win(server_config):
-    return _get_os_type(server_config) == 'windows'
+    return server_config.get('os_type', 'linux') == 'windows'
 
 
 def _temp_sql_path(server_config):
-    suf = random.randint(10000, 99999)
-    return 'C:/Windows/Temp/oscar_{}.sql'.format(suf) if _is_win(server_config) else '/tmp/oscar_{}.sql'.format(suf)
+    uid = uuid.uuid4().hex[:8]
+    return 'C:/Windows/Temp/oscar_{}.sql'.format(uid) if _is_win(server_config) else '/tmp/oscar_{}.sql'.format(uid)
 
 
 def _build_sql_cmd(server_config, sql, sql_file):

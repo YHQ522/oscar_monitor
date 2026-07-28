@@ -146,7 +146,7 @@ async function saveUser() {
         if (r.status === 'ok') { swalSuccess(r.msg); location.reload(); }
         else swalError(r.msg);
     } else {
-        if (!data.password) { Swal.fire({...SWAL_BASE, icon:'warning', title:'提示', html:'<div class="swal-msg">请输入密码</div>', confirmButtonText:'知道了'}); return; }
+        if (!data.password) { swalInfo('请输入密码', '提示'); return; }
         const r = await apiFetch('/api/users', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
         if (r.status === 'ok') { swalSuccess(r.msg); location.reload(); }
         else swalError(r.msg);
