@@ -36,7 +36,10 @@
         <div class="card server-card h-100 glare-hover" id="card-{{ s.id }}" data-search="{{ s.name }} {{ s.ssh_host }} {{ s.db_host }} {{ s.db_name }} {{ s.db_user }}">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-server"></i> <strong>{{ s.name or s.ssh_host }}</strong></span>
-                <span class="badge bg-secondary status-badge" id="status-{{ s.id }}">待采集</span>
+                <span>
+                    <span class="badge bg-secondary me-1 health-badge" id="health-{{ s.id }}" title="健康评分" style="display:none;">--</span>
+                    <span class="badge bg-secondary status-badge" id="status-{{ s.id }}">待采集</span>
+                </span>
             </div>
             <div class="card-body p-2">
                 <div class="small text-muted mb-2" style="font-size:0.7rem;">
@@ -211,6 +214,7 @@ async function quickCollect(serverId) {
             badge.textContent = data.timestamp.split(' ')[1] || data.timestamp;
             badge.className = 'badge bg-success status-badge';
             updateSummary(serverId, data);
+            fetchHealthScore(serverId);
         }
     } catch (e) {
         badge.textContent = '失败';
@@ -218,6 +222,33 @@ async function quickCollect(serverId) {
         summary.innerHTML = '<span class="text-danger small">连接失败</span>';
     }
 }
+
+// ── 健康评分 ───────────────────────────────────────────
+async function fetchHealthScore(serverId) {
+    const hb = document.getElementById('health-' + serverId);
+    if (!hb) return;
+    try {
+        const h = await apiFetch('/api/servers/' + serverId + '/health');
+        if (h.score === null || h.score === undefined) { hb.style.display = 'none'; return; }
+        hb.style.display = '';
+        hb.textContent = h.score + '分';
+        hb.className = 'badge me-1 health-badge ' + (h.score >= 80 ? 'bg-success' : h.score >= 60 ? 'bg-warning text-dark' : 'bg-danger');
+        hb.title = h.details ? Object.entries(h.details).map(([k,v]) => k + ': ' + v.value + ' (' + v.score + '分)').join('\n') : '';
+    } catch(e) {}
+}
+
+async function fetchAllHealthScores() {
+    const badges = document.querySelectorAll('.health-badge');
+    for (const b of badges) {
+        const sid = b.id.replace('health-', '');
+        const statusBadge = document.getElementById('status-' + sid);
+        if (statusBadge && statusBadge.classList.contains('bg-success')) {
+            fetchHealthScore(sid);
+        }
+    }
+}
+// 页面加载后自动获取已采集服务的健康评分
+setTimeout(fetchAllHealthScores, 2000);
 
 let lastMetrics = {};
 let trendHistory = {};

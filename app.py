@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import uuid
+import re
 import threading
 import time
 import traceback
@@ -72,6 +73,18 @@ CONFIG_LOCK = threading.Lock()
 
 CACHE = {}
 CACHE_LOCK = threading.Lock()
+
+# 趋势历史：每个服务器保留最近 288 条 (24h@5min)
+TREND_HISTORY = {}
+TREND_LOCK = threading.Lock()
+MAX_TREND_POINTS = 288
+
+# 登录限速：{ip: [timestamp, ...]}
+LOGIN_ATTEMPTS = {}
+LOGIN_LOCK = threading.Lock()
+LOGIN_MAX_FAILURES = 5
+LOGIN_WINDOW = 300       # 5 分钟窗口
+LOGIN_BAN_DURATION = 900  # 封禁 15 分钟
 
 
 def login_required(f):
@@ -226,16 +239,34 @@ def internal_error(e):
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
+        client_ip = request.remote_addr or '127.0.0.1'
+        # ── 登录限速检查 ──
+        with LOGIN_LOCK:
+            now_ts = time.time()
+            attempts = [t for t in LOGIN_ATTEMPTS.get(client_ip, []) if now_ts - t < LOGIN_WINDOW]
+            if len(attempts) >= LOGIN_MAX_FAILURES:
+                oldest = min(attempts) if attempts else 0
+                if now_ts - oldest < LOGIN_BAN_DURATION:
+                    remaining = int((LOGIN_BAN_DURATION - (now_ts - oldest)) / 60) + 1
+                    return render_template('login.html', error=f'登录失败次数过多，请 {remaining} 分钟后再试')
+                else:
+                    attempts = []
+            LOGIN_ATTEMPTS[client_ip] = attempts
+
         username = request.form.get('username', '')
         password = request.form.get('password', '')
         user = check_login(username, password)
         if user:
+            with LOGIN_LOCK:
+                LOGIN_ATTEMPTS.pop(client_ip, None)
             session['logged_in'] = True
             session['username'] = username
             session['user'] = user
             session['last_activity'] = time.time()
             session.permanent = True
             return redirect(url_for('index'))
+        with LOGIN_LOCK:
+            LOGIN_ATTEMPTS.setdefault(client_ip, []).append(time.time())
         return render_template('login.html', error='用户名或密码错误')
     return render_template('login.html', error=None)
 
@@ -250,6 +281,14 @@ def logout():
 @login_required
 def help_page():
     return render_template('help.html', **template_context())
+
+
+@app.route('/sql-terminal')
+@login_required
+@permission_required('admin')
+def sql_terminal_page():
+    servers = load_servers()
+    return render_template('sql_terminal.html', servers=servers, **template_context())
 
 
 @app.route('/')
@@ -696,24 +735,68 @@ def api_stream():
 @app.route('/api/trends/<server_id>')
 @login_required
 def api_trends(server_id):
-    """返回最近采集趋势数据（连接数变化）"""
-    trends = []
+    """返回历史趋势数据（CPU/内存/连接数/慢SQL 多指标）"""
+    hours = request.args.get('hours', 24, type=int)
+    max_points = min(hours * 12, MAX_TREND_POINTS)
+    with TREND_LOCK:
+        history = TREND_HISTORY.get(server_id, [])
+        result = history[-max_points:] if len(history) > max_points else list(history)
+    return jsonify(result)
+
+
+@app.route('/api/servers/<server_id>/health')
+@login_required
+def api_health_score(server_id):
+    """返回服务器健康评分 0-100"""
     with CACHE_LOCK:
         cached = CACHE.get(server_id, {}).get('data')
-    if cached:
-        perf = cached.get('db_queries', {}).get('performance', {})
-        sessions = perf.get('session_count', {})
-        count = 0
-        if sessions.get('rows') and sessions['rows']:
+    if not cached:
+        return jsonify({"score": None, "msg": "暂无数据，请先采集"})
+    score, details = _calc_health_score(cached)
+    return jsonify({"score": score, "details": details})
+
+
+@app.route('/api/servers/<server_id>/sql-query', methods=['POST'])
+@login_required
+def api_sql_query(server_id):
+    """Web SQL 终端：执行只读查询"""
+    server = get_server_by_id(server_id)
+    if not server:
+        return jsonify({"error": "服务不存在"}), 404
+    data = request.get_json(silent=True) or {}
+    sql = (data.get('sql', '') or '').strip()
+    if not sql:
+        return jsonify({"error": "请输入 SQL 语句"}), 400
+    sql_upper = sql.upper().strip()
+    safe_prefixes = ['SELECT', 'WITH', 'EXPLAIN', 'SHOW', 'DESC', 'DESCRIBE']
+    if not any(sql_upper.startswith(p) for p in safe_prefixes):
+        return jsonify({"error": "仅支持只读查询 (SELECT / WITH / EXPLAIN / SHOW / DESC)"}), 403
+    dangerous = ['DROP', 'DELETE', 'INSERT', 'UPDATE', 'ALTER', 'CREATE', 'TRUNCATE',
+                 'GRANT', 'REVOKE', 'EXEC', 'EXECUTE', 'CALL', 'MERGE', 'REPLACE']
+    for kw in dangerous:
+        if re.search(r'\b' + kw + r'\b', sql_upper):
+            return jsonify({"error": f"禁止使用 {kw} 语句"}), 403
+    if len(sql) > 5000:
+        return jsonify({"error": "SQL 语句过长（最大 5000 字符）"}), 400
+
+    try:
+        from collector import _temp_sql_path, _build_sql_cmd, _run_local, _ssh_exec, parse_isql_output
+        sql_file = _temp_sql_path(server)
+        _, cmd = _build_sql_cmd(server, sql, sql_file)
+        if _need_ssh(server):
+            client = _ssh_connect(server, timeout=15)
             try:
-                count = int(sessions['rows'][0][0])
-            except (ValueError, IndexError):
-                pass
-        trends.append({
-            'ts': cached.get('timestamp', ''),
-            'sessions': count,
-        })
-    return jsonify(trends)
+                out, err, ec = _ssh_exec(client, cmd, timeout=60)
+            finally:
+                client.close()
+        else:
+            out, err, ec = _run_local(cmd, timeout=60)
+        if ec != 0 and not out.strip():
+            return jsonify({"error": err or "执行失败", "raw": out})
+        result = parse_isql_output(out, 'sql_query')
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/api/servers/<server_id>/export')
@@ -793,7 +876,131 @@ def _collect_one(server):
     with CACHE_LOCK:
         CACHE[sid] = {"data": result, "time": time.time()}
     _persist_errors(server, result)
+    _record_trend(sid, result)
     return result
+
+
+def _record_trend(sid, result):
+    """从采集结果中提取关键指标，写入趋势历史"""
+    try:
+        point = {'ts': result.get('timestamp', time.strftime('%Y-%m-%d %H:%M:%S'))}
+
+        # CPU
+        cpu_info = result.get('os_info', {}).get('cpu', {})
+        cpu_raw = cpu_info.get('output', '') or ''
+        cpu_m = re.search(r'LoadPercentage[= ]*(\d+)', cpu_raw)
+        if cpu_m:
+            point['cpu_pct'] = int(cpu_m.group(1))
+        else:
+            cpu_m2 = re.search(r'(\d+\.?\d*)\s*id', cpu_raw)
+            if cpu_m2:
+                point['cpu_pct'] = round(100 - float(cpu_m2.group(1)), 1)
+
+        # Memory
+        mem_info = result.get('os_info', {}).get('memory', {})
+        mem_raw = mem_info.get('output', '') or ''
+        wm = re.search(r'TotalMB=(\d+).*?FreeMB=(\d+).*?UsedMB=(\d+)', mem_raw)
+        if wm:
+            total_m = int(wm.group(1)); used_m = int(wm.group(3))
+            point['mem_pct'] = round(used_m / total_m * 100, 1) if total_m > 0 else 0
+
+        # Sessions
+        perf = result.get('db_queries', {}).get('performance', {})
+        sessions = perf.get('session_count', {})
+        if sessions.get('rows') and sessions['rows']:
+            try:
+                point['sessions'] = int(sessions['rows'][0][0])
+            except (ValueError, IndexError):
+                pass
+
+        # Slow SQL count
+        slow = perf.get('slow_sql', {})
+        if slow.get('rows'):
+            point['slow_sql_count'] = len(slow['rows'])
+
+        with TREND_LOCK:
+            if sid not in TREND_HISTORY:
+                TREND_HISTORY[sid] = []
+            TREND_HISTORY[sid].append(point)
+            if len(TREND_HISTORY[sid]) > MAX_TREND_POINTS:
+                TREND_HISTORY[sid] = TREND_HISTORY[sid][-MAX_TREND_POINTS:]
+    except Exception:
+        pass
+
+
+def _calc_health_score(data):
+    """计算健康评分 0-100，返回 (score, details)"""
+    details = {}
+    total_weight = 0
+    weighted_score = 0
+
+    # ── CPU (权重 25) ──
+    cpu_info = data.get('os_info', {}).get('cpu', {})
+    cpu_raw = cpu_info.get('output', '') or ''
+    cpu_pct = None
+    cm = re.search(r'LoadPercentage[= ]*(\d+)', cpu_raw)
+    if cm:
+        cpu_pct = int(cm.group(1))
+    else:
+        cm2 = re.search(r'(\d+\.?\d*)\s*id', cpu_raw)
+        if cm2:
+            cpu_pct = round(100 - float(cm2.group(1)), 1)
+    if cpu_pct is not None:
+        cpu_score = max(0, 100 - cpu_pct * 1.2)
+        details['cpu'] = {'value': f'{cpu_pct}%', 'score': round(cpu_score)}
+        weighted_score += cpu_score * 25
+        total_weight += 25
+
+    # ── Memory (权重 25) ──
+    mem_info = data.get('os_info', {}).get('memory', {})
+    mem_raw = mem_info.get('output', '') or ''
+    wm = re.search(r'TotalMB=(\d+).*?FreeMB=(\d+).*?UsedMB=(\d+)', mem_raw)
+    if wm:
+        total_m = int(wm.group(1)); used_m = int(wm.group(3))
+        mem_pct = round(used_m / total_m * 100, 1) if total_m > 0 else 0
+        mem_score = max(0, 100 - mem_pct * 1.5)
+        details['memory'] = {'value': f'{mem_pct}%', 'score': round(mem_score)}
+        weighted_score += mem_score * 25
+        total_weight += 25
+
+    # ── Sessions / Connections (权重 20) ──
+    perf = data.get('db_queries', {}).get('performance', {})
+    sessions = perf.get('session_count', {})
+    if sessions.get('rows') and sessions['rows']:
+        try:
+            sess_count = int(sessions['rows'][0][0])
+            sess_score = max(0, 100 - sess_count * 0.5)  # 200连接=0分
+            details['sessions'] = {'value': str(sess_count), 'score': round(sess_score)}
+            weighted_score += sess_score * 20
+            total_weight += 20
+        except (ValueError, IndexError):
+            pass
+
+    # ── Slow SQL (权重 15) ──
+    slow = perf.get('slow_sql', {})
+    slow_count = len(slow.get('rows', [])) if slow.get('rows') else 0
+    slow_score = max(0, 100 - slow_count * 10)
+    details['slow_sql'] = {'value': f'{slow_count} 条', 'score': round(slow_score)}
+    weighted_score += slow_score * 15
+    total_weight += 15
+
+    # ── Deadlocks (权重 15) ──
+    deadlock = perf.get('deadlock_count', {})
+    dl_count = 0
+    if deadlock.get('rows') and deadlock['rows']:
+        try:
+            dl_count = int(deadlock['rows'][0][0])
+        except (ValueError, IndexError):
+            pass
+    dl_score = 100 if dl_count == 0 else max(0, 100 - dl_count * 20)
+    details['deadlocks'] = {'value': str(dl_count), 'score': round(dl_score)}
+    weighted_score += dl_score * 15
+    total_weight += 15
+
+    if total_weight == 0:
+        return 100, details
+    score = round(weighted_score / total_weight)
+    return max(0, min(100, score)), details
 
 
 def _persist_errors(server, result):

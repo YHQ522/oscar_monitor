@@ -8,127 +8,264 @@
 
 <div class="row g-3">
     <div class="col-3 d-none d-md-block">
-        <nav class="list-group small sticky-top" style="top:70px;">
-            <a class="list-group-item list-group-item-action" href="#quickstart">快速入门</a>
-            <a class="list-group-item list-group-item-action" href="#monitor">采集与监控</a>
-            {% if 'servers_edit' in user_perms or is_admin %}
-            <a class="list-group-item list-group-item-action" href="#servers">服务管理</a>
+        <nav class="list-group small sticky-top" style="top:70px;max-height:calc(100vh - 80px);overflow-y:auto;">
+            <a class="list-group-item list-group-item-action" href="#quickstart"><i class="bi bi-rocket-takeoff"></i> 快速入门</a>
+            <a class="list-group-item list-group-item-action" href="#dashboard"><i class="bi bi-speedometer2"></i> 仪表板与健康评分</a>
+            <a class="list-group-item list-group-item-action" href="#monitor"><i class="bi bi-graph-up"></i> 采集与趋势图</a>
+            {% if 'servers_view' in user_perms or 'servers_edit' in user_perms or is_admin %}
+            <a class="list-group-item list-group-item-action" href="#servers"><i class="bi bi-server"></i> 服务管理</a>
             {% endif %}
             {% if 'control_view' in user_perms or 'control_exec' in user_perms or is_admin %}
-            <a class="list-group-item list-group-item-action" href="#control">启停管控</a>
+            <a class="list-group-item list-group-item-action" href="#control"><i class="bi bi-power"></i> 启停管控</a>
             {% endif %}
-            <a class="list-group-item list-group-item-action" href="#profile">个人设置</a>
-            <a class="list-group-item list-group-item-action" href="#faq">常见问题</a>
             {% if is_admin %}
-            <a class="list-group-item list-group-item-action text-danger" href="#admin">系统管理</a>
+            <a class="list-group-item list-group-item-action text-primary" href="#sql"><i class="bi bi-terminal"></i> SQL 终端</a>
+            {% endif %}
+            <a class="list-group-item list-group-item-action" href="#security"><i class="bi bi-shield-check"></i> 登录安全</a>
+            <a class="list-group-item list-group-item-action" href="#profile"><i class="bi bi-person-gear"></i> 个人设置</a>
+            <a class="list-group-item list-group-item-action" href="#faq"><i class="bi bi-question-circle"></i> 常见问题</a>
+            {% if is_admin %}
+            <a class="list-group-item list-group-item-action text-danger" href="#admin"><i class="bi bi-gear"></i> 系统管理</a>
             {% endif %}
         </nav>
     </div>
 
     <div class="col-12 col-md-9">
 
+        <!-- ═══ 快速入门 ═══ -->
         <div class="card mb-3" id="quickstart">
             <div class="card-header"><i class="bi bi-rocket-takeoff"></i> 快速入门</div>
             <div class="card-body small">
-                <ol>
-                    <li><strong>浏览全局监控</strong>：首页展示所有服务的核心指标</li>
-                    <li><strong>查看详情</strong>：点击服务卡片进入详情页，可分别采集各类指标</li>
+                <ol class="mb-0">
+                    <li><strong>登录系统</strong>：使用管理员分配的用户名和密码登录</li>
+                    <li><strong>浏览仪表板</strong>：首页展示所有服务的核心指标和健康评分</li>
+                    <li><strong>查看详情</strong>：点击服务卡片进入详情页，可分别采集各类指标，查看趋势图</li>
                     {% if 'control_view' in user_perms or 'control_exec' in user_perms or is_admin %}
-                    <li><strong>查询状态</strong>：启停管控页查询数据库和应用运行状态</li>
+                    <li><strong>启停管控</strong>：查看和管理数据库及应用运行状态</li>
+                    {% endif %}
+                    {% if is_admin %}
+                    <li><strong>管理配置</strong>：用户管理、系统配置、SQL 终端</li>
                     {% endif %}
                 </ol>
             </div>
         </div>
 
-        <div class="card mb-3" id="monitor">
-            <div class="card-header"><i class="bi bi-graph-up"></i> 采集与监控</div>
+        <!-- ═══ 仪表板与健康评分 ═══ -->
+        <div class="card mb-3" id="dashboard">
+            <div class="card-header"><i class="bi bi-speedometer2"></i> 仪表板与健康评分</div>
             <div class="card-body small">
-                <ul class="mb-2">
-                    <li><strong>全局监控</strong>：首页展示连接数、表空间、内存/磁盘/CPU 等核心指标及趋势箭头</li>
-                    <li><strong>详情页</strong>：点击服务卡片进入，左侧面板可分别采集各类目</li>
-                    <li><strong>自动采集</strong>：后台每 30 秒自动采集，SSE 实时推送</li>
-                </ul>
-                <table class="table table-sm table-bordered mb-0">
-                    <tr class="table-secondary"><th>采集类别</th><th>说明</th></tr>
-                    <tr><td>基础信息</td><td>数据库版本号、版本详细信息</td></tr>
-                    <tr><td>数据库信息</td><td>数据库配置、主备节点信息</td></tr>
-                    <tr><td>存储空间</td><td>表空间、数据文件、日志文件使用率</td></tr>
-                    <tr><td>对象统计</td><td>表/索引/视图/存储过程的数量</td></tr>
-                    <tr><td>性能监控</td><td>连接数、死锁、慢 SQL、内存使用</td></tr>
-                    <tr><td>操作系统</td><td>内存/磁盘/CPU、系统错误日志、数据库日志</td></tr>
+                <p><strong>首页仪表板</strong>以卡片形式展示所有已配置的服务，每张卡片包含：</p>
+                <table class="table table-sm table-bordered mb-2">
+                    <tr class="table-secondary"><th>元素</th><th>说明</th></tr>
+                    <tr>
+                        <td><span class="badge bg-success">85分</span></td>
+                        <td><strong>健康评分</strong>：0-100 分综合指标，综合考虑 CPU 使用率（25%）、内存使用率（25%）、连接数（20%）、慢 SQL（15%）、死锁（15%）。<br>
+                        🟢 ≥80 健康 · 🟡 60-79 关注 · 🔴 &lt;60 告警</td>
+                    </tr>
+                    <tr><td>内存使用 / 磁盘使用 / CPU 负载</td><td>实时采集的操作系统核心指标，进度条颜色随使用率变化</td></tr>
+                    <tr><td>趋势箭头</td><td>与上次采集对比，↑ 上升 ↓ 下降 → 持平，直观感知指标变化方向</td></tr>
+                    <tr><td>采集按钮 ⚡</td><td>手动触发单台服务器采集，刷新仪表板数据</td></tr>
+                    <tr><td>搜索框</td><td>按服务器名称、主机、数据库名过滤卡片</td></tr>
+                    <tr><td>实时推送</td><td>后台每 30 秒自动采集，SSE 推送更新</td></tr>
                 </table>
+                <div class="alert alert-info py-1 small mb-0">
+                    <i class="bi bi-lightbulb"></i> 健康评分在每次采集后自动更新。悬停徽章可查看各项指标明细。
+                </div>
             </div>
         </div>
 
-        {% if 'servers_edit' in user_perms or is_admin %}
+        <!-- ═══ 采集与趋势图 ═══ -->
+        <div class="card mb-3" id="monitor">
+            <div class="card-header"><i class="bi bi-graph-up"></i> 采集与趋势图</div>
+            <div class="card-body small">
+                <h6>采集类别</h6>
+                <table class="table table-sm table-bordered mb-3">
+                    <tr class="table-secondary"><th>类别</th><th>采集项</th></tr>
+                    <tr><td>基础信息</td><td>版本号、版本详情、非默认参数</td></tr>
+                    <tr><td>数据库信息</td><td>数据库配置、主备节点状态</td></tr>
+                    <tr><td>存储空间</td><td>有效空间、模式空间、表空间、数据文件、日志文件</td></tr>
+                    <tr><td>对象统计</td><td>表/索引/视图/存储过程数量（总量 + 按用户）</td></tr>
+                    <tr><td>性能监控</td><td>连接数、死锁、等待链、活跃 SQL、慢 SQL、数据库内存</td></tr>
+                    <tr><td>操作系统</td><td>内存/磁盘/CPU 使用率、系统错误日志、数据库错误日志</td></tr>
+                </table>
+
+                <h6>历史趋势图</h6>
+                <p>详情页点击"全部采集"后，<strong>趋势图面板</strong>自动渲染：</p>
+                <ul class="mb-2">
+                    <li><strong>多指标折线图</strong>：CPU %（红色）、内存 %（橙色）、连接数（蓝色）、慢 SQL（紫色虚线）</li>
+                    <li><strong>双 Y 轴</strong>：左侧百分比轴（CPU/内存），右侧数量轴（连接/慢SQL）</li>
+                    <li><strong>时间范围</strong>：下拉切换 1 小时 / 6 小时 / 24 小时</li>
+                    <li><strong>数据积累</strong>：每次采集自动记录，最多保留 288 个点（24 小时 @ 5 分钟间隔）</li>
+                </ul>
+                <div class="alert alert-info py-1 small mb-0">
+                    <i class="bi bi-lightbulb"></i> 趋势数据存储在内存中，重启服务后清空。建议保持定时采集持续运行以积累历史数据。
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ 服务管理 ═══ -->
+        {% if 'servers_view' in user_perms or 'servers_edit' in user_perms or is_admin %}
         <div class="card mb-3" id="servers">
             <div class="card-header"><i class="bi bi-server"></i> 服务管理</div>
             <div class="card-body small">
-                <table class="table table-sm table-bordered mb-2">
-                    <tr><td class="text-nowrap">必填项</td><td>远程主机*、远程端口*、登录用户*、登录密码*。勾选数据库监控时：数据库主机*、数据库端口*、数据库用户*、数据库密码*、数据库名*、isql命令路径*</td></tr>
-                    <tr><td>显示名称</td><td>选填，不填自动使用远程主机 IP</td></tr>
-                    <tr><td>加入启停管控</td><td>勾选后出现在启停管控页</td></tr>
-                    <tr><td>持久化错误日志</td><td>勾选后写入数据库</td></tr>
-                    <tr><td>测试连接</td><td>验证 SSH 和数据库连通性</td></tr>
+                {% if 'servers_edit' in user_perms or is_admin %}
+                <h6>添加 / 编辑服务器</h6>
+                <table class="table table-sm table-bordered mb-3">
+                    <tr class="table-secondary"><th style="width:140px;">字段</th><th>说明</th></tr>
+                    <tr><td>显示名称</td><td>选填，不填则显示远程主机 IP</td></tr>
+                    <tr><td>远程主机 *</td><td>SSH 连接的 IP 或主机名</td></tr>
+                    <tr><td>远程端口 *</td><td>SSH 端口，默认 22</td></tr>
+                    <tr><td>登录用户 *</td><td>SSH 登录用户名</td></tr>
+                    <tr><td>登录密码 *</td><td>SSH 登录密码</td></tr>
+                    <tr><td>操作系统类型</td><td>Linux / Windows，影响采集命令的生成</td></tr>
+                    <tr><td>数据库监控</td><td>勾选后显示数据库连接配置</td></tr>
+                    <tr><td>数据库主机 *</td><td>数据库服务器地址</td></tr>
+                    <tr><td>数据库端口 *</td><td>数据库端口，默认 2003</td></tr>
+                    <tr><td>数据库用户 *</td><td>数据库登录用户</td></tr>
+                    <tr><td>数据库密码 *</td><td>数据库登录密码</td></tr>
+                    <tr><td>数据库名 *</td><td>数据库名称</td></tr>
+                    <tr><td>isql 命令 *</td><td>isql 可执行文件路径，默认 isql</td></tr>
+                    <tr><td>加入启停管控</td><td>勾选后该服务出现在启停管控页面</td></tr>
+                    <tr><td>持久化错误日志</td><td>勾选后错误和慢 SQL 写入数据库（需全局启用日志持久化）</td></tr>
+                    <tr><td>自动刷新</td><td>仪表板定时采集间隔（秒），0 为关闭</td></tr>
+                    <tr><td>采集项勾选</td><td>选择该服务需要采集的数据库类别和 OS 检查项</td></tr>
+                    <tr><td>测试连接</td><td>保存前验证 SSH 和数据库连通性</td></tr>
                 </table>
+                {% endif %}
+                <h6>服务列表操作</h6>
+                <ul class="mb-0">
+                    <li><strong>查看详情</strong>：点击服务名进入详情页，查看完整采集数据</li>
+                    {% if 'servers_edit' in user_perms or is_admin %}
+                    <li><strong>编辑</strong>：修改服务配置</li>
+                    <li><strong>删除</strong>：移除服务（需二次确认）</li>
+                    {% endif %}
+                </ul>
             </div>
         </div>
         {% endif %}
 
+        <!-- ═══ 启停管控 ═══ -->
         {% if 'control_view' in user_perms or 'control_exec' in user_perms or is_admin %}
         <div class="card mb-3" id="control">
             <div class="card-header"><i class="bi bi-power"></i> 启停管控</div>
             <div class="card-body small">
-                <table class="table table-sm table-bordered mb-0">
-                    <tr class="table-secondary"><th>管理器</th><th>说明</th></tr>
-                    <tr><td>systemctl</td><td>现代 Linux（Kylin V10、CentOS 7+）</td></tr>
-                    <tr><td>service</td><td>老旧 Linux（CentOS 6）</td></tr>
-                    <tr><td>/etc/init.d/</td><td>无 systemd 的旧系统</td></tr>
-                    <tr><td>脚本</td><td>自定义 Shell 命令或脚本</td></tr>
+                <p>远程管理数据库服务和关联应用的启停状态。</p>
+                <table class="table table-sm table-bordered mb-2">
+                    <tr class="table-secondary"><th>服务管理器</th><th>适用场景</th></tr>
+                    <tr><td><code>systemctl</code></td><td>现代 Linux（Kylin V10、CentOS 7+、Ubuntu 16+）</td></tr>
+                    <tr><td><code>service</code></td><td>老旧 Linux（CentOS 6）</td></tr>
+                    <tr><td><code>/etc/init.d/</code></td><td>无 systemd 的旧系统</td></tr>
+                    <tr><td><code>脚本</code></td><td>自定义启停命令，适合特殊部署场景</td></tr>
+                    <tr><td><code>sc</code></td><td>Windows 服务管理</td></tr>
                 </table>
                 {% if 'control_exec' in user_perms or is_admin %}
-                <div class="alert alert-warning py-1 small mt-2 mb-0">
-                    操作前需二次确认，防止误操作。
+                <div class="alert alert-warning py-1 small mb-0">
+                    <i class="bi bi-exclamation-triangle"></i> 启动/停止/重启操作需二次弹窗确认，防止误操作。
                 </div>
                 {% endif %}
             </div>
         </div>
         {% endif %}
 
-        <div class="card mb-3" id="profile">
-            <div class="card-header"><i class="bi bi-person-gear"></i> 个人设置</div>
+        <!-- ═══ SQL 终端（仅管理员） ═══ -->
+        {% if is_admin %}
+        <div class="card mb-3 border-primary" id="sql">
+            <div class="card-header bg-primary text-white"><i class="bi bi-terminal"></i> SQL 终端 <span class="badge bg-warning text-dark ms-1">仅管理员</span></div>
             <div class="card-body small">
-                <p><strong>修改密码</strong>：点击右上角用户名 → 修改密码，输入原密码和新密码。</p>
-                <p><strong>忘记密码</strong>：请联系管理员在「用户管理」中重置您的密码。</p>
+                <p>全屏独立 SQL 查询页面，入口位于右上角 <strong>用户名下拉菜单 → SQL 终端</strong>。</p>
+                <h6>功能特性</h6>
+                <table class="table table-sm table-bordered mb-2">
+                    <tr class="table-secondary"><th style="width:140px;">功能</th><th>说明</th></tr>
+                    <tr><td>🔒 安全限制</td><td><strong>仅允许只读查询</strong>：SELECT、WITH、EXPLAIN、SHOW、DESC。DROP / DELETE / INSERT / UPDATE 等写操作被自动拦截并返回 403。</td></tr>
+                    <tr><td>📋 服务器切换</td><td>顶部下拉框选择目标服务器，自动加载已配置的所有服务</td></tr>
+                    <tr><td>📦 快捷模板</td><td>右侧面板 8 个预设 SQL：会话列表、连接数、等待链、内存、事务、数据库信息、表空间、慢 SQL TOP20</td></tr>
+                    <tr><td>📜 历史记录</td><td>最近 30 条查询保存在浏览器本地，点击即可回填。支持 ↑↓ 方向键快速浏览</td></tr>
+                    <tr><td>⌨️ 快捷键</td><td><kbd>Ctrl+Enter</kbd> 执行 · <kbd>↑</kbd><kbd>↓</kbd> 历史记录导航</td></tr>
+                    <tr><td>🎨 编辑器</td><td>暗色主题等宽字体输入框</td></tr>
+                </table>
+                <div class="alert alert-danger py-1 small mb-0">
+                    <i class="bi bi-shield-lock"></i> 此功能<strong>仅管理员</strong>可用。普通用户无权访问该页面，直接访问 URL 将返回 403 禁止。
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- ═══ 登录安全 ═══ -->
+        <div class="card mb-3" id="security">
+            <div class="card-header"><i class="bi bi-shield-check"></i> 登录安全</div>
+            <div class="card-body small">
+                <table class="table table-sm table-bordered mb-0">
+                    <tr class="table-secondary"><th style="width:140px;">安全机制</th><th>说明</th></tr>
+                    <tr>
+                        <td>🔐 密码加密</td>
+                        <td>用户密码使用 PBKDF2-SHA256（10 万次迭代）+ 随机盐值存储，非明文</td>
+                    </tr>
+                    <tr>
+                        <td>🚫 登录限速</td>
+                        <td>同一 IP 在 <strong>5 分钟内连续失败 5 次</strong>后，自动封禁 <strong>15 分钟</strong>。被封后显示 "登录失败次数过多，请 X 分钟后再试"</td>
+                    </tr>
+                    <tr>
+                        <td>⏰ 会话超时</td>
+                        <td>登录后 <strong>30 分钟</strong>无操作自动退出，需重新登录</td>
+                    </tr>
+                    <tr>
+                        <td>🔑 密码修改</td>
+                        <td>用户可自行修改密码（需输入原密码验证），忘记密码联系管理员重置</td>
+                    </tr>
+                    <tr>
+                        <td>🛡️ 权限控制</td>
+                        <td>每个页面和 API 均有权限校验，无权限操作返回 403</td>
+                    </tr>
+                </table>
             </div>
         </div>
 
+        <!-- ═══ 个人设置 ═══ -->
+        <div class="card mb-3" id="profile">
+            <div class="card-header"><i class="bi bi-person-gear"></i> 个人设置</div>
+            <div class="card-body small">
+                <p><strong>修改密码</strong>：点击右上角用户名 → 修改密码，输入原密码和新密码（至少 4 位）。</p>
+                <p><strong>忘记密码</strong>：出于安全考虑，不支持自助重置。请联系管理员在「用户管理」中为您重置密码。</p>
+                <p><strong>暗色模式</strong>：浏览器支持的系统级暗色模式自动适配。</p>
+            </div>
+        </div>
+
+        <!-- ═══ 常见问题 ═══ -->
         <div class="card mb-3" id="faq">
             <div class="card-header"><i class="bi bi-question-circle"></i> 常见问题</div>
             <div class="card-body small">
                 <div class="mb-3">
-                    <strong>Q: 数据采集返回空</strong>
-                    <p class="mb-1 text-muted">采集项默认不勾选，需手动选择或点击"全部勾选"。如有编辑权限可修改服务配置。</p>
+                    <strong>Q: 数据采集返回空或报错</strong>
+                    <p class="mb-1 text-muted">(1) 检查采集项是否勾选（服务配置中可调整）；(2) SSH 连接是否正常；(3) isql 路径是否正确（Windows 需完整路径）。</p>
                 </div>
                 <div class="mb-3">
                     <strong>Q: 测试连接失败</strong>
-                    <p class="mb-1 text-muted">检查 SSH 端口 22 是否开放，用户名密码是否正确。Windows 需安装 OpenSSH Server。</p>
+                    <p class="mb-1 text-muted">SSH：检查端口 22 是否开放、用户名密码是否正确。Windows 需安装 OpenSSH Server。<br>数据库：检查 isql 是否能正常执行 <code>isql -h 主机 -p 端口 -d 库名 -U 用户/密码</code>。</p>
                 </div>
                 <div class="mb-3">
-                    <strong>Q: 能看到哪些页面</strong>
-                    <p class="mb-1 text-muted">取决于管理员分配的权限：全局监控 / 服务管理(查看) / 服务管理(编辑) / 启停管控(查看) / 启停管控(执行)。</p>
+                    <strong>Q: 健康评分不显示</strong>
+                    <p class="mb-1 text-muted">需先点击"采集"按钮获取数据，评分在采集完成后自动计算。如果采集失败（显示"失败"徽章），评分不会更新。</p>
                 </div>
                 <div class="mb-3">
-                    <strong>Q: 忘记密码怎么办</strong>
-                    <p class="mb-1 text-muted">请联系管理员在「用户管理」中重置密码。出于安全考虑，不支持自助重置。</p>
+                    <strong>Q: 趋势图没有数据</strong>
+                    <p class="mb-1 text-muted">需要至少 2 次采集才有折线。趋势数据保存在内存中，服务重启后清空。建议开启定时采集积累数据。</p>
+                </div>
+                <div class="mb-3">
+                    <strong>Q: 登录被限制</strong>
+                    <p class="mb-1 text-muted">连续 5 次密码错误后账号（同 IP）将被临时封禁 15 分钟。等待倒计时结束后重试，或联系管理员排查。</p>
+                </div>
+                <div class="mb-3">
+                    <strong>Q: 我能看到哪些页面</strong>
+                    <p class="mb-1 text-muted">取决于管理员分配的权限：全局监控 / 服务管理(查看) / 服务管理(编辑) / 启停管控(查看) / 启停管控(执行)。admin 用户拥有全部权限。</p>
                 </div>
                 <div>
                     <strong>Q: 需要更多权限</strong>
-                    <p class="mb-1 text-muted">联系管理员在用户管理中调整您的权限即可。</p>
+                    <p class="mb-1 text-muted">联系管理员在「用户管理」中调整您的权限配置即可。</p>
                 </div>
             </div>
         </div>
 
+        <!-- ═══ 系统管理（仅管理员） ═══ -->
         {% if is_admin %}
         <hr class="my-4">
         <h5 class="text-danger"><i class="bi bi-shield-lock"></i> 以下内容仅管理员可见</h5>
@@ -136,34 +273,44 @@
         <div class="card mb-3" id="admin">
             <div class="card-header bg-danger text-white"><i class="bi bi-gear"></i> 系统管理</div>
             <div class="card-body small">
-                <div class="mb-3">
-                    <strong>权限说明</strong>
-                    <table class="table table-sm table-bordered mt-1 mb-0">
-                        <tr class="table-secondary"><th>权限</th><th>可操作</th></tr>
-                        <tr><td>全局监控</td><td>查看首页仪表盘</td></tr>
-                        <tr><td>服务管理(查看)</td><td>查看服务列表和详情</td></tr>
-                        <tr><td>服务管理(编辑)</td><td>添加/编辑/删除服务</td></tr>
-                        <tr><td>启停管控(查看)</td><td>查看状态、查询</td></tr>
-                        <tr><td>启停管控(执行)</td><td>启动/停止/重启</td></tr>
-                        <tr class="table-danger"><td>系统管理</td><td>用户管理、系统配置（仅 admin）</td></tr>
-                    </table>
-                </div>
-                <div class="mb-3">
-                    <strong>系统配置</strong>
-                    <ul class="mb-1 mt-1">
-                        <li>日志持久化数据库连接（含 SSH 中转）</li>
-                        <li>日志保留天数（超期自动清理）</li>
-                        <li>并发采集线程数（1-50，默认 8）</li>
-                    </ul>
-                </div>
-                <div>
-                    <strong>部署与存储</strong>
-                    <ul class="mb-1 mt-1">
-                        <li>执行 <code>sudo bash install.sh</code> 安装为系统服务</li>
-                        <li>配置 JSON 文件在 <code>/opt/oscar-monitor/data/</code></li>
-                        <li>数据库表：oscar_servers / oscar_users / oscar_log_collect</li>
-                    </ul>
-                </div>
+
+                <h6>权限体系</h6>
+                <table class="table table-sm table-bordered mb-3">
+                    <tr class="table-secondary"><th>权限</th><th>可访问</th></tr>
+                    <tr><td><code>dashboard</code></td><td>全局监控首页仪表板</td></tr>
+                    <tr><td><code>servers_view</code></td><td>服务列表、详情页、采集数据查看</td></tr>
+                    <tr><td><code>servers_edit</code></td><td>添加/编辑/删除服务配置</td></tr>
+                    <tr><td><code>control_view</code></td><td>启停管控页、查看运行状态</td></tr>
+                    <tr><td><code>control_exec</code></td><td>启动/停止/重启数据库和应用</td></tr>
+                    <tr class="table-danger"><td><code>admin</code></td><td>用户管理、系统配置、SQL 终端</td></tr>
+                </table>
+
+                <h6>用户管理</h6>
+                <ul class="mb-3">
+                    <li><strong>添加用户</strong>：设置用户名、初始密码、分配权限</li>
+                    <li><strong>编辑权限</strong>：勾选/取消勾选对应权限，即时生效</li>
+                    <li><strong>重置密码</strong>：帮助忘记密码的用户重置（不支持查看原密码）</li>
+                    <li><strong>删除用户</strong>：admin 账号不可删除</li>
+                </ul>
+
+                <h6>系统配置</h6>
+                <table class="table table-sm table-bordered mb-3">
+                    <tr class="table-secondary"><th>配置项</th><th>说明</th></tr>
+                    <tr><td>日志持久化</td><td>开启后，数据库错误和慢 SQL 写入后端数据库表 <code>OSCAR_LOG_COLLECT</code></td></tr>
+                    <tr><td>持久化数据库</td><td>存储日志的 OSCAR 数据库连接信息（支持 SSH 中转）</td></tr>
+                    <tr><td>服务持久化</td><td>开启后，服务器配置同步写入数据库表 <code>OSCAR_SERVERS</code></td></tr>
+                    <tr><td>日志保留天数</td><td>超期日志自动清理（默认 30 天）</td></tr>
+                    <tr><td>采集并发数</td><td>后台定时采集的线程池大小（1-20，默认 8）</td></tr>
+                </table>
+
+                <h6>部署说明</h6>
+                <ul class="mb-0">
+                    <li>配置文件位于 <code>data/config.json</code>、<code>data/servers.json</code>、<code>data/users.json</code></li>
+                    <li>Linux 执行 <code>sudo bash install.sh</code> 安装为 systemd 服务</li>
+                    <li>Windows 双击 <code>build_win.bat</code> 打包为 exe</li>
+                    <li>默认端口：5080（启动参数 <code>--port</code> 可自定义）</li>
+                    <li>数据库表：<code>OSCAR_SERVERS</code> / <code>OSCAR_USERS</code> / <code>OSCAR_LOG_COLLECT</code></li>
+                </ul>
             </div>
         </div>
         {% endif %}

@@ -109,9 +109,17 @@
         </div>
 
         <div class="card mt-3" id="trendPanel" style="display:none;">
-            <div class="card-header py-1"><i class="bi bi-graph-up"></i> <strong>趋势图 (最近30分钟)</strong></div>
-            <div class="card-body p-2"><canvas id="trendChart" style="width:100%;height:240px;"></canvas></div>
+            <div class="card-header py-1 d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-graph-up"></i> <strong>历史趋势</strong></span>
+                <select class="form-select form-select-sm" style="width:auto;" onchange="loadTrends()" id="trendHours">
+                    <option value="1">最近1小时</option>
+                    <option value="6">最近6小时</option>
+                    <option value="24" selected>最近24小时</option>
+                </select>
+            </div>
+            <div class="card-body p-2"><canvas id="trendChart" style="width:100%;height:280px;"></canvas></div>
         </div>
+
     </div>
 </div>
 {% endblock %}
@@ -831,37 +839,46 @@ function exportCSV() {
     window.open('/api/servers/' + SERVER_ID + '/export', '_blank');
 }
 
-// ── Chart.js trend ────────────────────────────────────
+// ── Chart.js 多指标趋势图 ──────────────────────────────
 let trendChart = null;
 async function loadTrends() {
     try {
-        const data = await apiFetch('/api/trends/' + SERVER_ID);
+        const hours = document.getElementById('trendHours')?.value || 24;
+        const data = await apiFetch('/api/trends/' + SERVER_ID + '?hours=' + hours);
         if (!data || data.length < 2) return;
         document.getElementById('trendPanel').style.display = '';
-        const labels = data.map(p => p.ts).slice(-15);
-        const sessions = data.map(p => p.sessions || 0).slice(-15);
+        const labels = data.map(p => p.ts);
+        const cpuData = data.map(p => p.cpu_pct ?? null);
+        const memData = data.map(p => p.mem_pct ?? null);
+        const sessData = data.map(p => p.sessions ?? null);
+        const slowData = data.map(p => p.slow_sql_count ?? null);
+
         if (trendChart) trendChart.destroy();
         const ctx = document.getElementById('trendChart').getContext('2d');
+        const datasets = [];
+        if (cpuData.some(v => v !== null)) datasets.push({label:'CPU %',data:cpuData,borderColor:'#dc3545',backgroundColor:'rgba(220,53,69,0.1)',tension:0.3,fill:false,pointRadius:0,yAxisID:'y'});
+        if (memData.some(v => v !== null)) datasets.push({label:'内存 %',data:memData,borderColor:'#fd7e14',backgroundColor:'rgba(253,126,20,0.1)',tension:0.3,fill:false,pointRadius:0,yAxisID:'y'});
+        if (sessData.some(v => v !== null)) datasets.push({label:'连接数',data:sessData,borderColor:'#2563EB',backgroundColor:'rgba(37,99,235,0.1)',tension:0.3,fill:false,pointRadius:0,yAxisID:'y1'});
+        if (slowData.some(v => v !== null)) datasets.push({label:'慢SQL',data:slowData,borderColor:'#6f42c1',backgroundColor:'rgba(111,66,193,0.1)',tension:0.3,fill:false,pointRadius:0,yAxisID:'y1',borderDash:[4,2]});
+
         trendChart = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: '连接数', data: sessions,
-                    backgroundColor: '#1E3A5F',
-                    borderColor: '#A16207',
-                    borderWidth: 1,
-                    borderRadius: 4
-                }]
-            },
+            type: 'line',
+            data: { labels, datasets },
             options: {
                 responsive: true, maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
-                scales: { y: { beginAtZero: true } }
+                interaction: { mode: 'index', intersect: false },
+                plugins: { legend: { position: 'top', labels: { usePointStyle: true, padding: 15 } } },
+                scales: {
+                    y: { type: 'linear', position: 'left', title: { display: true, text: '%' }, min: 0, max: 100, grid: { color: 'rgba(0,0,0,0.06)' } },
+                    y1: { type: 'linear', position: 'right', title: { display: true, text: '数量' }, min: 0, grid: { display: false } },
+                    x: { ticks: { maxTicksLimit: 12, maxRotation: 0 } }
+                }
             }
         });
     } catch(e) {}
 }
+
+
 {% endraw %}
 </script>
 {% endblock %}
