@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv*/
+.venv_test/
+.venv_new/
+data/servers.json
+data/users.json
+data/config.json
+data/audit.jsonl
+.vscode/
+.DS_Store
+Thumbs.db
+dist/
+build/
+*.spec
+__pycache__/

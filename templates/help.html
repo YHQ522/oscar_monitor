@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}帮助手册 - 管控平台{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4><i class="bi bi-book"></i> 帮助手册</h4>
+    {% if is_admin %}<span class="badge bg-danger small">管理员完整版</span>{% endif %}
+</div>
+
+<div class="row g-3">
+    <div class="col-3 d-none d-md-block">
+        <nav class="list-group small sticky-top" style="top:70px;">
+            <a class="list-group-item list-group-item-action" href="#quickstart">快速入门</a>
+            <a class="list-group-item list-group-item-action" href="#monitor">采集与监控</a>
+            {% if 'servers_edit' in user_perms or is_admin %}
+            <a class="list-group-item list-group-item-action" href="#servers">服务管理</a>
+            {% endif %}
+            {% if 'control_view' in user_perms or 'control_exec' in user_perms or is_admin %}
+            <a class="list-group-item list-group-item-action" href="#control">启停管控</a>
+            {% endif %}
+            <a class="list-group-item list-group-item-action" href="#profile">个人设置</a>
+            <a class="list-group-item list-group-item-action" href="#faq">常见问题</a>
+            {% if is_admin %}
+            <a class="list-group-item list-group-item-action text-danger" href="#admin">系统管理</a>
+            {% endif %}
+        </nav>
+    </div>
+
+    <div class="col-12 col-md-9">
+
+        <div class="card mb-3" id="quickstart">
+            <div class="card-header"><i class="bi bi-rocket-takeoff"></i> 快速入门</div>
+            <div class="card-body small">
+                <ol>
+                    <li><strong>浏览全局监控</strong>：首页展示所有服务的核心指标</li>
+                    <li><strong>查看详情</strong>：点击服务卡片进入详情页，可分别采集各类指标</li>
+                    {% if 'control_view' in user_perms or 'control_exec' in user_perms or is_admin %}
+                    <li><strong>查询状态</strong>：启停管控页查询数据库和应用运行状态</li>
+                    {% endif %}
+                </ol>
+            </div>
+        </div>
+
+        <div class="card mb-3" id="monitor">
+            <div class="card-header"><i class="bi bi-graph-up"></i> 采集与监控</div>
+            <div class="card-body small">
+                <ul class="mb-2">
+                    <li><strong>全局监控</strong>：首页展示连接数、表空间、内存/磁盘/CPU 等核心指标及趋势箭头</li>
+                    <li><strong>详情页</strong>：点击服务卡片进入，左侧面板可分别采集各类目</li>
+                    <li><strong>自动采集</strong>：后台每 30 秒自动采集，SSE 实时推送</li>
+                </ul>
+                <table class="table table-sm table-bordered mb-0">
+                    <tr class="table-secondary"><th>采集类别</th><th>说明</th></tr>
+                    <tr><td>基础信息</td><td>数据库版本号、版本详细信息</td></tr>
+                    <tr><td>数据库信息</td><td>数据库配置、主备节点信息</td></tr>
+                    <tr><td>存储空间</td><td>表空间、数据文件、日志文件使用率</td></tr>
+                    <tr><td>对象统计</td><td>表/索引/视图/存储过程的数量</td></tr>
+                    <tr><td>性能监控</td><td>连接数、死锁、慢 SQL、内存使用</td></tr>
+                    <tr><td>操作系统</td><td>内存/磁盘/CPU、系统错误日志、数据库日志</td></tr>
+                </table>
+            </div>
+        </div>
+
+        {% if 'servers_edit' in user_perms or is_admin %}
+        <div class="card mb-3" id="servers">
+            <div class="card-header"><i class="bi bi-server"></i> 服务管理</div>
+            <div class="card-body small">
+                <table class="table table-sm table-bordered mb-2">
+                    <tr><td class="text-nowrap">必填项</td><td>远程主机*、远程端口*、登录用户*、登录密码*。勾选数据库监控时：数据库主机*、数据库端口*、数据库用户*、数据库密码*、数据库名*、isql命令路径*</td></tr>
+                    <tr><td>显示名称</td><td>选填，不填自动使用远程主机 IP</td></tr>
+                    <tr><td>加入启停管控</td><td>勾选后出现在启停管控页</td></tr>
+                    <tr><td>持久化错误日志</td><td>勾选后写入数据库</td></tr>
+                    <tr><td>测试连接</td><td>验证 SSH 和数据库连通性</td></tr>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if 'control_view' in user_perms or 'control_exec' in user_perms or is_admin %}
+        <div class="card mb-3" id="control">
+            <div class="card-header"><i class="bi bi-power"></i> 启停管控</div>
+            <div class="card-body small">
+                <table class="table table-sm table-bordered mb-0">
+                    <tr class="table-secondary"><th>管理器</th><th>说明</th></tr>
+                    <tr><td>systemctl</td><td>现代 Linux（Kylin V10、CentOS 7+）</td></tr>
+                    <tr><td>service</td><td>老旧 Linux（CentOS 6）</td></tr>
+                    <tr><td>/etc/init.d/</td><td>无 systemd 的旧系统</td></tr>
+                    <tr><td>脚本</td><td>自定义 Shell 命令或脚本</td></tr>
+                </table>
+                {% if 'control_exec' in user_perms or is_admin %}
+                <div class="alert alert-warning py-1 small mt-2 mb-0">
+                    操作前需二次确认，防止误操作。
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="card mb-3" id="profile">
+            <div class="card-header"><i class="bi bi-person-gear"></i> 个人设置</div>
+            <div class="card-body small">
+                <p><strong>修改密码</strong>：点击右上角用户名 → 修改密码，输入原密码和新密码。</p>
+                <p><strong>忘记密码</strong>：登录页点击"忘记密码"，输入用户名和新密码自助重置。</p>
+            </div>
+        </div>
+
+        <div class="card mb-3" id="faq">
+            <div class="card-header"><i class="bi bi-question-circle"></i> 常见问题</div>
+            <div class="card-body small">
+                <div class="mb-3">
+                    <strong>Q: 数据采集返回空</strong>
+                    <p class="mb-1 text-muted">采集项默认不勾选，需手动选择或点击"全部勾选"。如有编辑权限可修改服务配置。</p>
+                </div>
+                <div class="mb-3">
+                    <strong>Q: 测试连接失败</strong>
+                    <p class="mb-1 text-muted">检查 SSH 端口 22 是否开放，用户名密码是否正确。Windows 需安装 OpenSSH Server。</p>
+                </div>
+                <div class="mb-3">
+                    <strong>Q: 能看到哪些页面</strong>
+                    <p class="mb-1 text-muted">取决于管理员分配的权限：全局监控 / 服务管理(查看) / 服务管理(编辑) / 启停管控(查看) / 启停管控(执行)。</p>
+                </div>
+                <div class="mb-3">
+                    <strong>Q: 忘记密码怎么办</strong>
+                    <p class="mb-1 text-muted">登录页点击"忘记密码"，输入用户名和新密码自助重置。</p>
+                </div>
+                <div>
+                    <strong>Q: 需要更多权限</strong>
+                    <p class="mb-1 text-muted">联系管理员在用户管理中调整您的权限即可。</p>
+                </div>
+            </div>
+        </div>
+
+        {% if is_admin %}
+        <hr class="my-4">
+        <h5 class="text-danger"><i class="bi bi-shield-lock"></i> 以下内容仅管理员可见</h5>
+
+        <div class="card mb-3" id="admin">
+            <div class="card-header bg-danger text-white"><i class="bi bi-gear"></i> 系统管理</div>
+            <div class="card-body small">
+                <div class="mb-3">
+                    <strong>权限说明</strong>
+                    <table class="table table-sm table-bordered mt-1 mb-0">
+                        <tr class="table-secondary"><th>权限</th><th>可操作</th></tr>
+                        <tr><td>全局监控</td><td>查看首页仪表盘</td></tr>
+                        <tr><td>服务管理(查看)</td><td>查看服务列表和详情</td></tr>
+                        <tr><td>服务管理(编辑)</td><td>添加/编辑/删除服务</td></tr>
+                        <tr><td>启停管控(查看)</td><td>查看状态、查询</td></tr>
+                        <tr><td>启停管控(执行)</td><td>启动/停止/重启</td></tr>
+                        <tr class="table-danger"><td>系统管理</td><td>用户管理、系统配置（仅 admin）</td></tr>
+                    </table>
+                </div>
+                <div class="mb-3">
+                    <strong>系统配置</strong>
+                    <ul class="mb-1 mt-1">
+                        <li>日志持久化数据库连接（含 SSH 中转）</li>
+                        <li>日志保留天数（超期自动清理）</li>
+                        <li>并发采集线程数（1-50，默认 8）</li>
+                    </ul>
+                </div>
+                <div>
+                    <strong>部署与存储</strong>
+                    <ul class="mb-1 mt-1">
+                        <li>执行 <code>sudo bash install.sh</code> 安装为系统服务</li>
+                        <li>配置 JSON 文件在 <code>/opt/oscar-monitor/data/</code></li>
+                        <li>数据库表：oscar_servers / oscar_users / oscar_log_collect</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+    </div>
+</div>
+{% endblock %}

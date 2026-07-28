@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}历史错误日志 - {{ server.name or server.ssh_host }}{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4><i class="bi bi-file-earmark-text"></i> 历史错误日志 - {{ server.name or server.ssh_host }}</h4>
+    <a href="/server/{{ server.id }}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left"></i> 返回详情</a>
+</div>
+
+<div class="row g-2 mb-2">
+    <div class="col-md-3">
+        <select class="form-select form-select-sm" id="typeFilter" onchange="loadLogs(1)">
+            <option value="">全部类型</option>
+            <option value="db_error">数据库错误</option>
+            <option value="slow_sql">慢SQL</option>
+            <option value="os_errors">系统错误</option>
+        </select>
+    </div>
+    <div class="col-md-5">
+        <input type="text" class="form-control form-control-sm" id="keywordSearch" placeholder="搜索关键字..." oninput="debounceSearch()">
+    </div>
+    <div class="col-md-auto">
+        <button class="btn btn-outline-primary btn-sm" onclick="loadLogs(1)"><i class="bi bi-search"></i> 查询</button>
+    </div>
+    <div class="col-md-2">
+        <select class="form-select form-select-sm" id="pageSize" onchange="loadLogs(1)">
+            <option value="20">每页 20 条</option>
+            <option value="50" selected>每页 50 条</option>
+            <option value="100">每页 100 条</option>
+        </select>
+    </div>
+</div>
+
+<div class="table-responsive" style="max-height:calc(100vh - 200px);overflow:auto;">
+    <table class="table table-sm table-bordered table-hover mb-0">
+        <thead class="table-dark" style="position:sticky;top:0;z-index:10;">
+            <tr>
+                <th style="width:8%;">类型</th>
+                <th style="width:12%;">时间</th>
+                <th style="width:7%;">用户</th>
+                <th style="width:6%;">耗时</th>
+                <th style="width:5%;">次数</th>
+                <th>详情</th>
+            </tr>
+        </thead>
+        <tbody id="logBody">
+            <tr><td colspan="6" class="text-center text-muted py-3">加载中...</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<nav class="mt-2 d-flex justify-content-between align-items-center">
+    <small class="text-muted" id="pageInfo"></small>
+    <ul class="pagination pagination-sm mb-0" id="pagination"></ul>
+</nav>
+
+<div class="modal fade" id="detailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h6 class="modal-title" id="detailTitle">详情</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <pre id="detailContent" class="small p-2 bg-dark text-light rounded" style="max-height:500px;overflow:auto;white-space:pre-wrap;word-break:break-all;"></pre>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+<script>
+const SERVER_ID = '{{ server.id }}';
+let searchTimer = null;
+
+function showDetail(type, content) {
+    document.getElementById('detailTitle').textContent = type;
+    document.getElementById('detailContent').textContent = content;
+    new bootstrap.Modal(document.getElementById('detailModal')).show();
+}
+
+function debounceSearch() {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => loadLogs(1), 400);
+}
+
+async function loadLogs(page) {
+    document.getElementById('logBody').innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">加载中...</td></tr>';
+    const kw = document.getElementById('keywordSearch').value.trim();
+    const type = document.getElementById('typeFilter').value;
+    const size = document.getElementById('pageSize').value;
+    try {
+        const data = await apiFetch(`/api/servers/${SERVER_ID}/log-errors?page=${page}&size=${size}&kw=${encodeURIComponent(kw)}&type=${encodeURIComponent(type)}`);
+        renderLogs(data.logs || [], data.total || 0, page, parseInt(size));
+    } catch(e) {
+        document.getElementById('logBody').innerHTML = '<tr><td colspan="6" class="text-center text-danger">加载失败: ' + e.message + '</td></tr>';
+    }
+}
+
+function renderLogs(logs, total, page, size) {
+    if (!logs.length) {
+        document.getElementById('logBody').innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">无匹配记录</td></tr>';
+        document.getElementById('pageInfo').textContent = '';
+        document.getElementById('pagination').innerHTML = '';
+        return;
+    }
+    let html = '';
+    logs.forEach(l => {
+        const typeBadge = l.type === 'slow_sql' ? 'bg-warning text-dark' : l.type === 'db_error' ? 'bg-danger' : 'bg-secondary';
+        const full = l.sql || l.msg || '';
+        const detail = `<a href="#" class="text-decoration-none" onclick="showDetail('${escapeHtml(l.type)}', \`${escapeHtml(full)}\`);return false"><code class="small">${escapeHtml(full.substring(0,150))}${full.length>150?'<span class="text-primary"> ...点击查看全部</span>':''}</code></a>`;
+        const cost = l.cost && parseFloat(l.cost) > 0 ? l.cost + 's' : '-';
+        html += `<tr>
+            <td><span class="badge ${typeBadge}">${l.type}</span></td>
+            <td class="small">${l.time||'-'}</td>
+            <td class="small">${l.user||'-'}</td>
+            <td class="small">${cost}</td>
+            <td>${l.count||1}</td>
+            <td>${detail}</td>
+        </tr>`;
+    });
+    document.getElementById('logBody').innerHTML = html;
+
+    const totalPages = Math.ceil(total / size);
+    document.getElementById('pageInfo').textContent = `共 ${total} 条，第 ${page}/${totalPages} 页`;
+    let phtml = '';
+    const start = Math.max(1, page - 2);
+    const end = Math.min(totalPages, page + 2);
+    for (let i = start; i <= end; i++) {
+        phtml += `<li class="page-item ${i===page?'active':''}"><a class="page-link" href="#" onclick="loadLogs(${i});return false">${i}</a></li>`;
+    }
+    document.getElementById('pagination').innerHTML = phtml;
+}
+
+loadLogs(1);
+</script>
+{% endblock %}

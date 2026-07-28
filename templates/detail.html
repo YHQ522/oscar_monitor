@@ -1,0 +1,379 @@
+{% extends "base.html" %}
+{% block title %}{{ server.name or server.ssh_host }} - 详情{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3" style="position:fixed;top:50px;left:0;right:0;z-index:99;background:#f5f6fa;padding:8px 16px;">
+    <h4>
+        <a href="/" class="text-decoration-none"><i class="bi bi-speedometer2"></i></a> /
+        <i class="bi bi-server"></i> {{ server.name or server.ssh_host }}
+    </h4>
+    <div>
+        <button class="btn btn-success btn-sm" onclick="collectAll()"><i class="bi bi-play-fill"></i> 全部采集</button>
+        <button class="btn btn-outline-info btn-sm" onclick="exportCSV()"><i class="bi bi-download"></i> 导出CSV</button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="toggleAutoRefresh()" id="autoRefreshBtn">
+            <i class="bi bi-arrow-repeat"></i> 自动刷新: <span id="autoRefreshLabel">关</span>
+        </button>
+        <a href="/servers" class="btn btn-outline-primary btn-sm"><i class="bi bi-gear"></i> 服务管理</a>
+    </div>
+</div>
+
+<div class="row g-3" style="padding-top:96px;">
+    <div class="col-md-3">
+        <div class="card" style="position:sticky;top:104px;">
+            <div class="card-header"><strong><i class="bi bi-list-check"></i> 采集选项</strong></div>
+            <div class="card-body p-1" style="max-height:calc(100vh - 110px);overflow-y:auto;">
+                <div class="d-grid gap-1">
+                    {% set enabled_cats = server.enabled_categories %}
+                    {% set enabled_os = server.enabled_os_checks %}
+                    {% if 'basic_info' in enabled_cats %}
+                    <button class="btn btn-outline-info btn-sm text-start" onclick="collectCategory('basic_info')">
+                        <i class="bi bi-info-circle"></i> {{ query_sets.basic_info.label }}
+                    </button>
+                    {% endif %}
+                    {% if 'db_info' in enabled_cats %}
+                    <button class="btn btn-outline-info btn-sm text-start" onclick="collectCategory('db_info')">
+                        <i class="bi bi-database"></i> {{ query_sets.db_info.label }}
+                    </button>
+                    {% endif %}
+                    {% if 'storage' in enabled_cats %}
+                    <button class="btn btn-outline-info btn-sm text-start" onclick="collectCategory('storage')">
+                        <i class="bi bi-hdd"></i> {{ query_sets.storage.label }}
+                    </button>
+                    {% endif %}
+                    {% if 'objects' in enabled_cats %}
+                    <button class="btn btn-outline-info btn-sm text-start" onclick="collectCategory('objects')">
+                        <i class="bi bi-grid"></i> {{ query_sets.objects.label }}
+                    </button>
+                    {% endif %}
+                    {% if 'performance' in enabled_cats %}
+                    <button class="btn btn-outline-info btn-sm text-start" onclick="collectCategory('performance')">
+                        <i class="bi bi-graph-up"></i> {{ query_sets.performance.label }}
+                    </button>
+                    {% endif %}
+                    {% if 'install_path' in enabled_os %}
+                    <button class="btn btn-outline-info btn-sm text-start" onclick="collectOsCheck('install_path')">
+                        <i class="bi bi-folder"></i> {{ os_check_labels.install_path }}
+                    </button>
+                    {% endif %}
+                    {% if 'db_log_errors' in enabled_os %}
+                    <button class="btn btn-outline-info btn-sm text-start" onclick="collectOsCheck('db_log_errors')">
+                        <i class="bi bi-file-earmark-text"></i> {{ os_check_labels.db_log_errors }}
+                    </button>
+                    <a class="btn btn-outline-success btn-sm text-start" href="/server/{{ server.id }}/log-history" target="_blank">
+                        <i class="bi bi-search"></i> 查询历史错误日志
+                    </a>
+                    {% endif %}
+                    {% if enabled_cats|length > 0 and enabled_os|length > 0 %}
+                    <hr class="my-1">
+                    {% endif %}
+                    {% if 'memory' in enabled_os %}
+                    <button class="btn btn-outline-warning btn-sm text-start" onclick="collectOsCheck('memory')">
+                        <i class="bi bi-memory"></i> {{ os_check_labels.memory }}
+                    </button>
+                    {% endif %}
+                    {% if 'disk' in enabled_os %}
+                    <button class="btn btn-outline-warning btn-sm text-start" onclick="collectOsCheck('disk')">
+                        <i class="bi bi-hdd-stack"></i> {{ os_check_labels.disk }}
+                    </button>
+                    {% endif %}
+                    {% if 'cpu' in enabled_os %}
+                    <button class="btn btn-outline-warning btn-sm text-start" onclick="collectOsCheck('cpu')">
+                        <i class="bi bi-cpu"></i> {{ os_check_labels.cpu }}
+                    </button>
+                    {% endif %}
+                    {% if 'os_errors' in enabled_os %}
+                    <button class="btn btn-outline-warning btn-sm text-start" onclick="collectOsCheck('os_errors')">
+                        <i class="bi bi-exclamation-triangle"></i> {{ os_check_labels.os_errors }}
+                    </button>
+                    {% endif %}
+                    {% if server.apps %}
+                    <hr class="my-1">
+                    <button class="btn btn-outline-success btn-sm text-start" onclick="collectAll()">
+                        <i class="bi bi-boxes"></i> 应用状态 ({{ server.apps|length }})
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-9">
+        <div id="collectStatus" class="alert alert-info" style="display:none;">
+            <i class="bi bi-hourglass-split"></i> 正在采集数据...
+        </div>
+        <div id="errorMsg" class="alert alert-danger" style="display:none;"></div>
+
+        <div id="dataContainer">
+            <div class="text-center p-5 text-muted">
+                <i class="bi bi-cloud-download" style="font-size:3rem;"></i>
+                <p class="mt-2">请选择左侧采集选项或点击"全部采集"获取数据</p>
+            </div>
+        </div>
+
+        <div class="card mt-3" id="trendPanel" style="display:none;">
+            <div class="card-header py-1"><i class="bi bi-graph-up"></i> <strong>趋势图 (最近30分钟)</strong></div>
+            <div class="card-body p-1"><canvas id="trendChart" style="max-height:200px;"></canvas></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+<script>
+const SERVER_ID = '{{ server.id }}';
+const queryLabels = {{ query_labels|tojson }};
+const osCheckLabels = {{ os_check_labels|tojson }};
+{% raw %}
+let autoRefreshTimer = null;
+let autoRefreshEnabled = false;
+
+function showStatus(msg, type) {
+    const el = document.getElementById('collectStatus');
+    const errEl = document.getElementById('errorMsg');
+    if (type === 'error') {
+        errEl.textContent = msg;
+        errEl.style.display = '';
+        el.style.display = 'none';
+    } else if (type === 'info') {
+        el.textContent = msg;
+        el.style.display = '';
+        errEl.style.display = 'none';
+    } else if (type === 'success') {
+        el.textContent = msg;
+        el.style.display = '';
+        setTimeout(() => { el.style.display = 'none'; }, 3000);
+    }
+}
+
+// renderTable, renderCard, renderMetrics, renderDiskTable,
+// parseWinMem, parseLinuxMem, parseWinDisk, parseLinuxDisk,
+// parseWinCpu, parseLinuxCpu are now defined in static/js/main.js
+
+function renderResults(data) {
+    let html = '';
+    if (data.db_queries) {
+        for (const [cat, queries] of Object.entries(data.db_queries)) {
+            for (const [qname, result] of Object.entries(queries)) {
+                const qlabel = queryLabels[qname] || qname.replace(/_/g, ' ');
+                if (qname === 'version' || qname === 'version_detail') {
+                    const rows = (result.rows || []).filter(r => {
+                        const t = String(r[0] || '').trim();
+                        return t && t !== 'VERSION' && t !== 'VERSIONDETAIL';
+                    });
+                    let vhtml = '<table class="table table-sm table-borderless mb-0">';
+                    rows.forEach(row => {
+                        const text = String(row[0] || '');
+                        const parts = text.split(/[：:]\s*/);
+                        if (qname === 'version' && parts.length < 2) {
+                            vhtml += '<tr><td>' + text + '</td></tr>';
+                        } else if (parts.length >= 2) {
+                            vhtml += '<tr><td class="small text-muted">' + parts[0] + '</td><td>' + parts.slice(1).join(': ') + '</td></tr>';
+                        } else {
+                            vhtml += '<tr><td>' + text + '</td></tr>';
+                        }
+                    });
+                    vhtml += '</table>';
+                    html += renderCard(qlabel, 'info-circle', vhtml);
+                } else if (qname === 'session_count' || qname === 'deadlock_count' || qname === 'non_auto_commit' || qname === 'idle_non_auto_commit') {
+                    const val = result.rows && result.rows[0] ? parseInt(result.rows[0][0]) || 0 : 0;
+                    let color = 'success';
+                    if (qname === 'session_count') color = val > 100 ? 'danger' : val > 50 ? 'warning' : 'success';
+                    else if (qname === 'deadlock_count') color = val > 0 ? 'danger' : 'success';
+                    else if (qname === 'non_auto_commit' || qname === 'idle_non_auto_commit') color = val > 10 ? 'warning' : 'info';
+                    html += renderCard(qlabel, 'bar-chart', '<div class="text-center"><span class="display-6 text-' + color + '">' + val + '</span></div>');
+                } else if (qname === 'datafile_info' && result.rows) {
+                    let t = '<table class="table table-sm table-bordered mb-0"><thead class="table-secondary"><tr><th>表空间</th><th>路径</th><th>大小</th><th>空闲</th><th>使用率</th></tr></thead><tbody>';
+                    result.rows.forEach(row => {
+                        const pctStr = String(row[5] || '').replace('%','');
+                        const pct = parseFloat(pctStr) || 0;
+                        const bar = '<div class="progress" style="height:4px;"><div class="progress-bar ' + (pct > 80 ? 'bg-danger' : pct > 60 ? 'bg-warning' : 'bg-success') + '" style="width:' + pct + '%"></div></div> ' + pct.toFixed(1) + '%';
+                        t += '<tr><td>' + (row[1]||'') + '</td><td class="small">' + (row[2]||'').split('/').pop() + '</td><td>' + (row[3]||'') + '</td><td>' + (row[4]||'') + '</td><td>' + bar + '</td></tr>';
+                    });
+                    t += '</tbody></table>';
+                    html += renderCard(qlabel, 'hdd', t);
+                } else if (qname === 'slow_sql' && result.rows) {
+                    let t = '<table class="table table-sm table-bordered mb-0"><thead class="table-warning"><tr><th>耗时(s)</th><th>SQL</th></tr></thead><tbody>';
+                    result.rows.forEach(row => {
+                        t += '<tr><td class="text-danger">' + (row[0]||'') + '</td><td class="small"><code>' + escapeHtml(String(row[1]||'').substring(0,200)) + '</code></td></tr>';
+                    });
+                    t += '</tbody></table>';
+                    html += renderCard(qlabel, 'clock', t);
+                } else {
+                    html += renderCard(qlabel, 'table', renderTable(result));
+                }
+            }
+        }
+    }
+    if (data.os_info) {
+        for (const [check, result] of Object.entries(data.os_info)) {
+            const clabel = osCheckLabels[check] || check.replace(/_/g, ' ');
+            const output = result.output || '';
+            const err = result.error || '';
+            const hasTable = result.columns && result.rows && result.rows.length > 0;
+            if (hasTable) {
+                let preContent = '';
+                if (check === 'cpu' && result.load_1m) {
+                    preContent = '运行时间: ' + (result.uptime || '') + '\n负载: 1分钟=' + result.load_1m + ', 5分钟=' + result.load_5m + ', 15分钟=' + result.load_15m + '\n';
+                }
+                html += renderCard(clabel, 'grid', preContent + renderTable(result));
+            } else if (check === 'memory' && output) {
+                const mem = parseWinMem(output) || parseLinuxMem(output);
+                html += renderCard(clabel, 'memory', renderMetrics(mem));
+            } else if (check === 'disk' && output) {
+                const disks = parseWinDisk(output) || parseLinuxDisk(output);
+                html += renderCard(clabel, 'hdd-stack', renderDiskTable(disks));
+            } else if (check === 'cpu' && output) {
+                const cpu = parseWinCpu(output) || parseLinuxCpu(output);
+                html += renderCard(clabel, 'cpu', renderMetrics(cpu));
+            } else {
+                const content = '<pre class="small p-2 bg-dark text-light mb-0" style="max-height:300px;overflow:auto;">' + escapeHtml(output + '\n' + err) + '</pre>';
+                html += renderCard(clabel, 'terminal', content);
+            }
+        }
+    }
+    if (data.apps && data.apps.length > 0) {
+        let appHtml = '<table class="table table-sm table-bordered mb-0"><thead class="table-dark"><tr><th>应用名称</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+        data.apps.forEach(app => {
+            const badge = app.running ? '<span class="badge bg-success">运行中</span>' : '<span class="badge bg-danger">已停止</span>';
+            const btns = `<button class="btn btn-outline-success btn-sm py-0 px-1" onclick="appControl('${SERVER_ID}','${app.name}','start')" title="启动"><i class="bi bi-play-fill"></i></button>
+                <button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="appControl('${SERVER_ID}','${app.name}','stop')" title="停止"><i class="bi bi-stop-fill"></i></button>
+                <button class="btn btn-outline-warning btn-sm py-0 px-1" onclick="appControl('${SERVER_ID}','${app.name}','restart')" title="重启"><i class="bi bi-arrow-repeat"></i></button>
+                <button class="btn btn-outline-info btn-sm py-0 px-1" onclick="appControl('${SERVER_ID}','${app.name}','status')" title="刷新状态"><i class="bi bi-arrow-clockwise"></i></button>`;
+            appHtml += `<tr><td>${app.name}</td><td id="app-status-${app.name}">${badge}</td><td>${btns}</td></tr>`;
+        });
+        appHtml += '</tbody></table>';
+        html += renderCard('应用监控', 'boxes', appHtml);
+    }
+    return html;
+}
+
+async function collectAll() {
+    showStatus('正在采集全部数据...', 'info');
+    try {
+        const data = await apiFetch('/api/servers/' + SERVER_ID + '/collect', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        });
+        if (data.error) {
+            showStatus(data.error, 'error');
+        } else {
+            document.getElementById('dataContainer').innerHTML = renderResults(data);
+            showStatus('采集完成 - ' + data.timestamp, 'success');
+            loadTrends();
+        }
+    } catch (e) {
+        showStatus(e.message, 'error');
+    }
+}
+
+async function collectCategory(cat) {
+    showStatus('正在采集 ' + cat + ' ...', 'info');
+    try {
+        const data = await apiFetch('/api/servers/' + SERVER_ID + '/collect-partial', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({categories: [cat], os_checks: []})
+        });
+        if (data.error) {
+            showStatus(data.error, 'error');
+        } else {
+            document.getElementById('dataContainer').innerHTML = renderResults(data);
+            showStatus('采集完成', 'success');
+        }
+    } catch (e) {
+        showStatus(e.message, 'error');
+    }
+}
+
+async function collectOsCheck(check) {
+    showStatus('正在采集 ' + check + ' ...', 'info');
+    try {
+        const data = await apiFetch('/api/servers/' + SERVER_ID + '/collect-partial', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({categories: [], os_checks: [check]})
+        });
+        if (data.error) {
+            showStatus(data.error, 'error');
+        } else {
+            document.getElementById('dataContainer').innerHTML = renderResults(data);
+            showStatus('采集完成', 'success');
+        }
+    } catch (e) {
+        showStatus(e.message, 'error');
+    }
+}
+
+function toggleAutoRefresh() {
+    autoRefreshEnabled = !autoRefreshEnabled;
+    const label = document.getElementById('autoRefreshLabel');
+    if (autoRefreshEnabled) {
+        label.textContent = '开';
+        autoRefreshTimer = setInterval(collectAll, 30000);
+        showStatus('自动刷新已开启 (30秒间隔)', 'info');
+    } else {
+        label.textContent = '关';
+        if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+        showStatus('自动刷新已关闭', 'info');
+    }
+}
+
+async function appControl(serverId, appName, action) {
+    const statusCell = document.getElementById('app-status-' + appName);
+    try {
+        const result = await apiFetch('/api/servers/' + serverId + '/app-control', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({action: action, app: appName})
+        });
+        if (result.running !== undefined) {
+            statusCell.innerHTML = result.running ? '<span class="badge bg-success">运行中</span>' : '<span class="badge bg-danger">已停止</span>';
+        }
+        showStatus(result.msg || result.error || '操作完成', result.ok ? 'success' : 'error');
+    } catch (e) {
+        showStatus(e.message, 'error');
+    }
+}
+
+// ── CSV export ─────────────────────────────────────────
+function exportCSV() {
+    window.open('/api/servers/' + SERVER_ID + '/export', '_blank');
+}
+
+// ── Trend chart ────────────────────────────────────────
+let trendChart = null;
+async function loadTrends() {
+    try {
+        const data = await apiFetch('/api/trends/' + SERVER_ID);
+        if (!data || data.length < 2) return;
+        document.getElementById('trendPanel').style.display = '';
+        const labels = data.map(p => p.ts);
+        const sessions = data.map(p => p.sessions || 0);
+        const cpu = data.map(p => p.cpu);
+        const mem = data.map(p => p.mem_pct);
+        const datasets = [{label: '连接数', data: sessions, borderColor: '#0d6efd', tension: 0.3, yAxisID: 'y'}];
+        if (cpu.some(v => v !== null && v !== undefined)) {
+            datasets.push({label: 'CPU', data: cpu, borderColor: '#dc3545', tension: 0.3, yAxisID: 'y1'});
+        }
+        if (mem.some(v => v !== null && v !== undefined)) {
+            datasets.push({label: '内存%', data: mem, borderColor: '#198754', tension: 0.3, yAxisID: 'y1'});
+        }
+        if (trendChart) trendChart.destroy();
+        const ctx = document.getElementById('trendChart').getContext('2d');
+        trendChart = new Chart(ctx, {
+            type: 'line',
+            data: {labels, datasets},
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                scales: {
+                    y: {type: 'linear', position: 'left', title: {display: true, text: '连接数'}},
+                    y1: {type: 'linear', position: 'right', max: 100, title: {display: true, text: '%'}, grid: {drawOnChartArea: false}},
+                },
+                plugins: {legend: {display: true, position: 'bottom'}},
+            }
+        });
+    } catch(e) {}
+}
+{% endraw %}
+</script>
+{% endblock %}
