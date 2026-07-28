@@ -90,20 +90,30 @@ function makeMetric(icon, label, value, color) {
 
 function parseOsMemory(output) {
     try {
+        // Windows: TotalMB=... FreeMB=... UsedMB=...
         const win = output.match(/TotalMB=(\d+).*?FreeMB=(\d+).*?UsedMB=(\d+)/);
         if (win) {
             const total = parseFloat(win[1]), used = parseFloat(win[3]);
             return total > 0 ? (used / total * 100) : null;
         }
+        // Linux free -h / /proc/meminfo
         const lines = output.split('\n');
         for (const line of lines) {
-            if (line.startsWith('Mem:') || line.toLowerCase().includes('mem')) {
-                const nums = line.match(/\d+/g);
-                if (nums && nums.length >= 2) {
-                    const total = parseFloat(nums[0]);
-                    const used = parseFloat(nums[1]);
-                    if (total > 0) return (used / total * 100);
-                }
+            // free -h: Mem:  15Gi  4.2Gi  8.1Gi ...
+            const fm = line.match(/Mem:\s+([\d.]+)\s*\w*\s+([\d.]+)\s*\w*\s+([\d.]+)/);
+            if (fm) {
+                const total = parseFloat(fm[1]), used = parseFloat(fm[2]);
+                if (total > 0) return (used / total * 100);
+            }
+            // /proc/meminfo: MemTotal: ... kB
+            const mt = line.match(/MemTotal:\s+(\d+)/);
+            if (mt) {
+                // 等待 MemAvailable 或 MemFree
+                const ma = output.match(/MemAvailable:\s+(\d+)/);
+                const mf = output.match(/MemFree:\s+(\d+)/);
+                const total = parseFloat(mt[1]);
+                const free = ma ? parseFloat(ma[1]) : (mf ? parseFloat(mf[1]) : 0);
+                if (total > 0) return ((total - free) / total * 100);
             }
         }
     } catch(e) {}
@@ -115,21 +125,18 @@ function parseOsDisk(output) {
         const lines = output.split('\n');
         let maxPct = 0;
         for (const line of lines) {
+            // Windows: C 61.6GB/199.1GB
             const win = line.match(/^(\w+)\s+([\d.]+)GB\/([\d.]+)GB/);
             if (win) {
                 const used = parseFloat(win[2]), total = parseFloat(win[3]);
-                if (total > 0) {
-                    const pct = used / total * 100;
-                    if (pct > maxPct) maxPct = pct;
-                }
+                if (total > 0) { const pct = used / total * 100; if (pct > maxPct) maxPct = pct; }
             }
-            if (line.includes('/') && line.includes('%')) {
+            // Linux df -h: /dev/sda1  50G  20G  28G  42% /
+            // 以及 Windows 通用 % 匹配
+            if ((line.match(/^\/dev\//) || line.match(/^tmpfs/) || line.includes('/')) && line.includes('%')) {
                 const parts = line.trim().split(/\s+/);
                 for (const p of parts) {
-                    if (p.endsWith('%')) {
-                        const v = parseFloat(p);
-                        if (!isNaN(v) && v > maxPct) maxPct = v;
-                    }
+                    if (p.endsWith('%')) { const v = parseFloat(p); if (!isNaN(v) && v > maxPct) maxPct = v; }
                 }
             }
         }
@@ -288,9 +295,14 @@ function updateSummary(serverId, data) {
 
     // CPU 负载
     if (data.os_info?.cpu?.output) {
-        const load = parseCpuLoad(data.os_info.cpu.output);
-        if (load !== null) {
-            html += makeMetric('cpu', 'CPU负载', load, 'info') + trendArrow(serverId, 'cpu', parseFloat(load), 0.1) + '<br>';
+        const cpuOut = data.os_info.cpu.output;
+        let cpuPct = parseFloat(parseCpuLoad(cpuOut));
+        if (!isNaN(cpuPct)) {
+            // Linux load average (< 5) → 换算为百分比 (负载÷核数×100)
+            if (cpuPct < 5 && !cpuOut.includes('LoadPercentage=')) {
+                cpuPct = Math.min(100, Math.round(cpuPct * 25));
+            }
+            html += makeBar('CPU负载', cpuPct) + trendArrow(serverId, 'cpu', cpuPct, 0.5) + '<br>';
         }
     }
 

@@ -32,7 +32,9 @@ def _db_enabled():
 def _ensure_servers_table():
     if not _db_enabled():
         return False
-    _exec_sql(db, f"""
+    db = _cfg()
+    try:
+        _exec_sql(db, f"""
 create table if not exists {SERVERS_TABLE} (
     id           varchar(20) primary key,
     name         varchar(200),
@@ -60,13 +62,17 @@ create table if not exists {SERVERS_TABLE} (
     created_at   timestamp default now()
 );
 """.strip())
-    return True
+        return True
+    except Exception:
+        return False
 
 
 def _ensure_users_table():
     if not _db_enabled():
         return False
-    _exec_sql(db, f"""
+    db = _cfg()
+    try:
+        _exec_sql(db, f"""
 create table if not exists {USERS_TABLE} (
     username    varchar(100) primary key,
     password    varchar(200),
@@ -75,12 +81,15 @@ create table if not exists {USERS_TABLE} (
     created_at  timestamp default now()
 );
 """.strip())
-    return True
+        return True
+    except Exception:
+        return False
 
 
 def load_servers_from_db():
     if not _db_enabled() or not _ensure_servers_table():
         return None
+    db = _cfg()
     try:
         # Execute query and parse
         import persist
@@ -163,12 +172,17 @@ def save_server_to_db(server):
 def delete_server_from_db(server_id):
     if not _db_enabled() or not _ensure_servers_table():
         return
-    _exec_sql(db, f"delete from {SERVERS_TABLE} where id='{str(server_id).replace(chr(39),chr(39)+chr(39))}';")
+    db = _cfg()
+    try:
+        _exec_sql(db, f"delete from {SERVERS_TABLE} where id='{str(server_id).replace(chr(39),chr(39)+chr(39))}';")
+    except Exception:
+        pass
 
 
 def sync_users_to_db(users):
     if not _db_enabled() or not _ensure_users_table():
         return
+    db = _cfg()
     safe = lambda v: (str(v or '')).replace("'", "''")
     perms_json = lambda u: json.dumps(u.get('perms', []), ensure_ascii=False)
     for u in users:

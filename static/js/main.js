@@ -10,6 +10,72 @@ function escapeHtml(str) {
         .replace(/'/g, '&#039;');
 }
 
+// ═══════════════════════════════════════════════
+//  统一弹窗助手 (SweetAlert2 美化版)
+// ═══════════════════════════════════════════════
+const SWAL_BASE = {
+    customClass: {
+        popup: 'swal-popup',
+        title: 'swal-title',
+        htmlContainer: 'swal-text',
+        confirmButton: 'swal-btn swal-btn-confirm',
+        cancelButton: 'swal-btn swal-btn-cancel',
+    },
+    buttonsStyling: false,
+    showClass: { popup: 'animate__animated animate__fadeInUp animate__faster' },
+    hideClass: { popup: 'animate__animated animate__fadeOutDown animate__faster' },
+};
+
+function swalError(msg) {
+    return Swal.fire({
+        ...SWAL_BASE,
+        icon: 'error',
+        title: '操作失败',
+        html: `<div class="swal-msg">${escapeHtml(msg)}</div>`,
+        confirmButtonText: '知道了',
+        customClass: { ...SWAL_BASE.customClass, confirmButton: 'swal-btn swal-btn-confirm swal-btn-danger' },
+    });
+}
+function swalSuccess(msg) {
+    return Swal.fire({
+        ...SWAL_BASE,
+        icon: 'success',
+        title: '操作成功',
+        html: `<div class="swal-msg">${escapeHtml(msg)}</div>`,
+        timer: 1800,
+        showConfirmButton: false,
+    });
+}
+function swalConfirm(msg, title) {
+    return Swal.fire({
+        ...SWAL_BASE,
+        icon: 'question',
+        title: title || '确认操作',
+        html: `<div class="swal-msg">${escapeHtml(msg)}</div>`,
+        showCancelButton: true,
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        reverseButtons: false,
+        focusCancel: true,
+        iconColor: '#1E3A5F',
+    });
+}
+function swalDanger(msg, title) {
+    return Swal.fire({
+        ...SWAL_BASE,
+        icon: 'warning',
+        title: title || '危险操作',
+        html: `<div class="swal-msg" style="color:#dc3545;">${escapeHtml(msg)}</div>`,
+        showCancelButton: true,
+        confirmButtonText: '确定删除',
+        cancelButtonText: '取消',
+        reverseButtons: false,
+        focusCancel: true,
+        iconColor: '#dc3545',
+        customClass: { ...SWAL_BASE.customClass, confirmButton: 'swal-btn swal-btn-confirm swal-btn-danger' },
+    });
+}
+
 async function apiFetch(url, options) {
     const resp = await fetch(url, options);
     if (resp.status === 401) {
@@ -80,8 +146,14 @@ function validateRequired(fields) {
         const el = document.getElementById(f.id);
         const val = (el.value || '').trim();
         if (!val) {
-            alert(f.label + '为必填项');
-            el.focus();
+            Swal.fire({
+                icon: 'warning',
+                title: '必填项未填写',
+                html: `<span style="font-size:0.95rem;">请填写 <strong style="color:#d63384;">${f.label}</strong></span>`,
+                confirmButtonText: '知道了',
+                confirmButtonColor: '#1E3A5F',
+                didClose: () => { el.focus(); el.classList.add('is-invalid'); setTimeout(() => el.classList.remove('is-invalid'), 2000); }
+            });
             return false;
         }
     }

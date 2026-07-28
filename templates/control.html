@@ -263,26 +263,30 @@ async function saveSvcModal() {
                 cell.innerHTML = '<span class="small">' + name + '</span> ' + (isWin ? '' : '<span class="badge bg-light text-dark small">' + displayMgr + '</span> ') + '<button class="btn btn-link btn-sm p-0 ms-1" onclick="openSvcModal(\'' + serverId + '\')" title="编辑服务配置"><i class="bi bi-pencil-square small"></i></button>';
             }
         } else {
-            alert('保存失败: ' + (resp.error || ''));
+            swalError(resp.error || '未知错误');
         }
     } catch (e) {
-        alert('保存失败: ' + e.message);
+        swalError(e.message);
     }
 }
 
 async function controlAction(serverId, action, silent) {
     const badge = document.getElementById('status-badge-' + serverId);
     const msg = document.getElementById('status-msg-' + serverId);
+    if (!badge && !msg) return;
     const srv = serverList.find(s => s.id === serverId);
     const srvName = srv ? (srv.name || srv.ssh_host) : serverId;
     if (!silent) {
         if (action !== 'status') {
             const labels = {start:'启动', stop:'停止', restart:'重启'};
-            if (!confirm(`确定${labels[action]}服务 ${srvName} 吗？`)) return;
+            const cfm = await swalConfirm(`确定${labels[action]}服务 ${srvName} 吗？`, '确认' + labels[action]);
+            if (!cfm.isConfirmed) return;
         }
         const labels = {start:'启动中...', stop:'停止中...', restart:'重启中...', status:'查询中...'};
-        badge.textContent = labels[action] || action;
-        badge.className = 'badge bg-warning';
+        if (badge) {
+            badge.textContent = labels[action] || action;
+            badge.className = 'badge bg-warning';
+        }
     }
 
     try {
@@ -294,38 +298,36 @@ async function controlAction(serverId, action, silent) {
 
         if (action === 'status') {
             if (result.running) {
-                badge.textContent = '运行中';
-                badge.className = 'badge bg-success';
+                if (badge) { badge.textContent = '运行中'; badge.className = 'badge bg-success'; }
             } else {
-                badge.textContent = '已停止';
-                badge.className = 'badge bg-danger';
+                if (badge) { badge.textContent = '已停止'; badge.className = 'badge bg-danger'; }
             }
-            msg.textContent = result.msg || '';
+            if (msg) msg.textContent = result.msg || '';
             return;
         }
 
         if (result.ok) {
-            badge.textContent = action === 'start' ? '已启动' : action === 'stop' ? '已停止' : '已重启';
-            badge.className = 'badge bg-success';
-            msg.textContent = result.msg || '';
+            if (badge) {
+                badge.textContent = action === 'start' ? '已启动' : action === 'stop' ? '已停止' : '已重启';
+                badge.className = 'badge bg-success';
+            }
+            if (msg) msg.textContent = result.msg || '';
             const log = `操作: ${action}\n服务: ${srvName}\n结果: 成功\n\n${result.output || result.msg || ''}`;
             document.getElementById('resultContent').textContent = log;
             document.getElementById('resultTitle').innerHTML = '<i class="bi bi-check-circle text-success"></i> ' + (action === 'start' ? '启动' : action === 'stop' ? '停止' : '重启') + '成功';
             new bootstrap.Modal(document.getElementById('resultModal')).show();
             setTimeout(() => controlAction(serverId, 'status', true), action === 'restart' ? 3000 : 2000);
         } else {
-            badge.textContent = '失败';
-            badge.className = 'badge bg-danger';
-            msg.textContent = result.msg || '';
+            if (badge) { badge.textContent = '失败'; badge.className = 'badge bg-danger'; }
+            if (msg) msg.textContent = result.msg || '';
             const log = `操作: ${action}\n服务: ${srvName}\n结果: 失败\n错误: ${result.msg || ''}\n\n${result.output || ''}`;
             document.getElementById('resultContent').textContent = log;
             document.getElementById('resultTitle').innerHTML = '<i class="bi bi-x-circle text-danger"></i> 操作失败';
             new bootstrap.Modal(document.getElementById('resultModal')).show();
         }
     } catch (e) {
-        badge.textContent = '失败';
-        badge.className = 'badge bg-danger';
-        msg.textContent = e.message;
+        if (badge) { badge.textContent = '失败'; badge.className = 'badge bg-danger'; }
+        if (msg) msg.textContent = e.message;
         document.getElementById('resultContent').textContent = '操作: ' + action + '\n服务: ' + srvName + '\n错误: ' + e.message;
         document.getElementById('resultTitle').innerHTML = '<i class="bi bi-x-circle text-danger"></i> 操作失败';
         new bootstrap.Modal(document.getElementById('resultModal')).show();
@@ -338,7 +340,8 @@ async function appControlAction(serverId, appName, action) {
     const srvName = srv ? (srv.name || srv.ssh_host) : serverId;
     if (action !== 'status') {
         const labels = {start:'启动', stop:'停止', restart:'重启'};
-        if (!confirm(`确定${labels[action]}应用 ${appName} (${srvName}) 吗？`)) return;
+        const cfm = await swalConfirm(`确定${labels[action]}应用 ${appName} (${srvName}) 吗？`, '确认' + labels[action]);
+        if (!cfm.isConfirmed) return;
     }
     try {
         const result = await apiFetch('/api/servers/' + serverId + '/app-control', {
@@ -425,16 +428,18 @@ async function saveAppSvcModal() {
             appSvcModal.hide();
             location.reload();
         } else {
-            alert('保存失败: ' + (resp.error || ''));
+            swalError(resp.error || '未知错误');
         }
     } catch (e) {
-        alert('保存失败: ' + e.message);
+        swalError(e.message);
     }
 }
 
 function refreshAllStatus() {
     {% for s in servers %}
+    {% if s.in_control %}
     controlAction('{{ s.id }}', 'status', true);
+    {% endif %}
     {% for app in s.apps or [] %}
     {% if app.in_control %}
     appControlAction('{{ s.id }}', '{{ app.name }}', 'status');

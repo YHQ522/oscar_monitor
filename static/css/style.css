@@ -98,11 +98,111 @@ h1,h2,h3,h4,h5,h6,.navbar-brand,strong,.card-header {
     letter-spacing: 0.5px;
     border: none;
 }
+.table tbody tr { transition: background 0.2s; }
+.table tbody tr:hover { background: rgba(37,99,235,0.04); }
+
+/* ── 登录页 ── */
+.login-page { background: linear-gradient(135deg, #1E3A5F 0%, #0F172A 100%); min-height: 100vh; display: flex; align-items: center; }
+.login-card { background: var(--surface); border-radius: 20px; box-shadow: var(--shadow-lg); overflow: hidden; }
+
+/* ── 状态徽章动画 ── */
+.status-badge { transition: all 0.3s ease; }
+
+/* ── 进度条光泽 ── */
+.progress { background: #e9ecef; border-radius: 10px; overflow: hidden; }
+.progress-bar { transition: width 0.6s ease; }
+.progress-bar.bg-success { background: linear-gradient(90deg, #059669, #10b981) !important; }
+.progress-bar.bg-warning { background: linear-gradient(90deg, #d97706, #f59e0b) !important; }
+.progress-bar.bg-danger  { background: linear-gradient(90deg, #dc2626, #ef4444) !important; }
+
+/* ── 输入框聚焦效果 ── */
+.form-control:focus, .form-select:focus {
+    border-color: #2563EB;
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.15);
+    transition: box-shadow 0.2s ease;
+}
+
+/* ── 滚动条美化 ── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
 .form-control, .form-select {
     border-radius: var(--radius-sm);
     border: 1.5px solid var(--border);
     transition: all var(--transition);
+}
+
+/* ═══════════════════════════════════════════════
+   SweetAlert2 弹窗美化
+   ═══════════════════════════════════════════════ */
+.swal-popup {
+    border-radius: 16px !important;
+    box-shadow: 0 20px 60px rgba(15,23,42,0.25) !important;
+    padding: 2rem 1.8rem 1.5rem !important;
+    background: #fff !important;
+}
+.swal-title {
+    font-size: 1.2rem !important;
+    font-weight: 700 !important;
+    color: #1E3A5F !important;
+    padding-top: 0.5rem !important;
+}
+.swal-text {
+    font-size: 0.92rem !important;
+    color: #475569 !important;
+    line-height: 1.6 !important;
+}
+.swal-msg {
+    font-size: 0.9rem;
+    color: #475569;
+    word-break: break-word;
+    max-height: 200px;
+    overflow-y: auto;
+    text-align: left;
+    padding: 0 0.5rem;
+}
+.swal-btn {
+    border-radius: 8px !important;
+    font-weight: 600 !important;
+    font-size: 0.88rem !important;
+    padding: 0.5rem 1.6rem !important;
+    transition: all 0.25s ease !important;
+    border: none !important;
+    outline: none !important;
+}
+.swal-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+.swal-btn-confirm {
+    background: linear-gradient(135deg, #1E3A5F, #2A5080) !important;
+    color: #fff !important;
+}
+.swal-btn-cancel {
+    background: #e2e8f0 !important;
+    color: #475569 !important;
+}
+.swal-btn-cancel:hover {
+    background: #cbd5e1 !important;
+}
+.swal-btn-danger {
+    background: linear-gradient(135deg, #dc2626, #ef4444) !important;
+    color: #fff !important;
+}
+/* 弹窗图标微调 */
+.swal2-icon {
+    margin: 0.5rem auto 0.8rem !important;
+}
+.swal2-actions {
+    gap: 0.6rem;
+    margin-top: 1.2rem !important;
+}
+/* 背景遮罩 */
+.swal2-backdrop-show {
+    backdrop-filter: blur(2px);
+    background: rgba(15,23,42,0.5) !important;
 }
 
 .form-control:focus, .form-select:focus {

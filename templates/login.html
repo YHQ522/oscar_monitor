@@ -8,6 +8,9 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/react-bits.css') }}" rel="stylesheet">
+    <style>
+        .pwd-masked { -webkit-text-security: disc; -moz-text-security: disc; }
+    </style>
 </head>
 <body class="login-page">
     <div class="container">
@@ -38,7 +41,10 @@
                                     <label class="form-label small required">密码</label>
                                     <div class="input-group">
                                         <span class="input-group-text"><i class="bi bi-lock"></i></span>
-                                        <input type="password" name="password" class="form-control" placeholder="请输入密码" required>
+                                        <input type="text" name="password" id="loginPwd" class="form-control pwd-masked" placeholder="请输入密码" required autocomplete="current-password">
+                                        <button class="input-group-text" type="button" onclick="toggleLoginPwd()" title="显示/隐藏密码" tabindex="-1">
+                                            <i class="bi bi-eye" id="loginPwdIcon"></i>
+                                        </button>
                                     </div>
                                 </div>
                                 <button type="submit" class="btn btn-primary w-100">
@@ -46,30 +52,8 @@
                                 </button>
                             </form>
                             <div class="text-center mt-2">
-                                <a href="#" class="small text-decoration-none" onclick="showReset()">忘记密码？</a>
+                                <span class="small text-muted">忘记密码？请联系管理员重置</span>
                             </div>
-                        </div>
-
-                        <div id="resetForm" style="display:none;">
-                            <h6 class="mb-3"><i class="bi bi-key"></i> 重置密码</h6>
-                            <div id="resetError" class="alert alert-danger py-2 small" style="display:none;"></div>
-                            <div id="resetOk" class="alert alert-success py-2 small" style="display:none;"></div>
-                            <div class="mb-2">
-                                <label class="form-label small required">用户名</label>
-                                <input type="text" id="resetUser" class="form-control form-control-sm" placeholder="请输入您的用户名">
-                            </div>
-                            <div class="mb-2">
-                                <label class="form-label small required">新密码</label>
-                                <input type="password" id="resetPass" class="form-control form-control-sm" placeholder="至少 4 位">
-                            </div>
-                            <div class="mb-2">
-                                <label class="form-label small required">确认新密码</label>
-                                <input type="password" id="resetPass2" class="form-control form-control-sm" placeholder="再次输入新密码">
-                            </div>
-                            <button class="btn btn-warning btn-sm w-100 mb-2" onclick="doReset()">
-                                <i class="bi bi-arrow-repeat"></i> 重置密码
-                            </button>
-                            <a href="#" class="small text-decoration-none" onclick="showLogin()">返回登录</a>
                         </div>
 
                     </div>
@@ -79,45 +63,16 @@
     </div>
 
     <script>
-    function showReset() {
-        document.getElementById('loginForm').style.display = 'none';
-        document.getElementById('resetForm').style.display = '';
-        document.getElementById('resetError').style.display = 'none';
-        document.getElementById('resetOk').style.display = 'none';
-    }
-    function showLogin() {
-        document.getElementById('loginForm').style.display = '';
-        document.getElementById('resetForm').style.display = 'none';
-    }
-    async function doReset() {
-        const u = document.getElementById('resetUser').value.trim();
-        const p1 = document.getElementById('resetPass').value;
-        const p2 = document.getElementById('resetPass2').value;
-        document.getElementById('resetError').style.display = 'none';
-        document.getElementById('resetOk').style.display = 'none';
-        if (!u) { showErr('请输入用户名'); return; }
-        if (p1.length < 4) { showErr('新密码至少 4 位'); return; }
-        if (p1 !== p2) { showErr('两次密码不一致'); return; }
-        try {
-            const r = await fetch('/api/reset-password', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({username: u, password: p1})
-            });
-            const d = await r.json();
-            if (d.ok) {
-                document.getElementById('resetOk').style.display = '';
-                document.getElementById('resetOk').textContent = d.msg;
-            } else {
-                showErr(d.msg);
-            }
-        } catch(e) {
-            showErr('请求失败: ' + e.message);
+    function toggleLoginPwd() {
+        const el = document.getElementById('loginPwd');
+        const icon = document.getElementById('loginPwdIcon');
+        if (el.classList.contains('pwd-masked')) {
+            el.classList.remove('pwd-masked');
+            icon.className = 'bi bi-eye-slash';
+        } else {
+            el.classList.add('pwd-masked');
+            icon.className = 'bi bi-eye';
         }
-    }
-    function showErr(msg) {
-        document.getElementById('resetError').style.display = '';
-        document.getElementById('resetError').textContent = msg;
     }
     </script>
 </body>

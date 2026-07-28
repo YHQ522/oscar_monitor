@@ -12,11 +12,17 @@
                 <form method="post">
                     <div class="mb-3">
                         <label class="form-label small required">原密码</label>
-                        <input type="password" name="old_password" class="form-control form-control-sm" required>
+                        <div class="input-group input-group-sm">
+                            <input type="text" name="old_password" id="oldPwd" class="form-control pwd-masked" required autocomplete="current-password">
+                            <button class="input-group-text" type="button" onclick="togglePwd('oldPwd','oldIcon')" title="显示/隐藏" tabindex="-1"><i class="bi bi-eye" id="oldIcon"></i></button>
+                        </div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label small required">新密码</label>
-                        <input type="password" name="new_password" class="form-control form-control-sm" required>
+                        <div class="input-group input-group-sm">
+                            <input type="text" name="new_password" id="newPwd" class="form-control pwd-masked" required autocomplete="new-password">
+                            <button class="input-group-text" type="button" onclick="togglePwd('newPwd','newIcon')" title="显示/隐藏" tabindex="-1"><i class="bi bi-eye" id="newIcon"></i></button>
+                        </div>
                     </div>
                     <button type="submit" class="btn btn-primary btn-sm">确认修改</button>
                 </form>
@@ -24,4 +30,22 @@
         </div>
     </div>
 </div>
+{% endblock %}
+{% block head %}
+<style>.pwd-masked { -webkit-text-security: disc; -moz-text-security: disc; }</style>
+{% endblock %}
+{% block scripts %}
+<script>
+function togglePwd(inputId, iconId) {
+    const el = document.getElementById(inputId);
+    const icon = document.getElementById(iconId);
+    if (el.classList.contains('pwd-masked')) {
+        el.classList.remove('pwd-masked');
+        icon.className = 'bi bi-eye-slash';
+    } else {
+        el.classList.add('pwd-masked');
+        icon.className = 'bi bi-eye';
+    }
+}
+</script>
 {% endblock %}

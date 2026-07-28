@@ -45,6 +45,10 @@ def load_config():
     for k, v in DEFAULT_CONFIG.items():
         if k not in cfg:
             cfg[k] = v
+        elif isinstance(v, dict) and isinstance(cfg.get(k), dict):
+            for dk, dv in v.items():
+                if dk not in cfg[k]:
+                    cfg[k][dk] = dv
     return cfg
 
 
@@ -55,36 +59,56 @@ def save_config(cfg):
 
 
 def _temp_sql():
+    if os.name == 'nt':
+        return os.path.join(os.environ.get('TEMP', 'C:/Windows/Temp'), f'oscar_p_{random.randint(10000, 99999)}.sql').replace('\\', '/')
     return f'/tmp/oscar_p_{random.randint(10000, 99999)}.sql'
 
 
 def _build_sql(db_cfg, sql_file, sql):
-    qt = shlex.quote(f"{db_cfg['user']}/{db_cfg['pass']}" if db_cfg.get('pass') else db_cfg['user'])
-    isql = f"{db_cfg.get('isql','isql')} -h {db_cfg['host']} -p {db_cfg['port']} -d {db_cfg['dbname']} -U {qt}"
+    qt = shlex.quote(f"{db_cfg.get('user','SYSDBA')}/{db_cfg.get('pass','')}" if db_cfg.get('pass') else db_cfg.get('user','SYSDBA'))
+    isql = f"{db_cfg.get('isql','isql')} -h {db_cfg.get('host','127.0.0.1')} -p {db_cfg.get('port',2003)} -d {db_cfg.get('dbname','OSRDB')} -U {qt}"
     return f"cat > {sql_file} << 'OSCAREOF'\n{sql}\nOSCAREOF\n{isql} < {sql_file} 2>&1; R=$?; rm -f {sql_file}; exit $R"
 
 
 def _exec_sql(db_cfg, sql):
     sql_file = _temp_sql()
-    cmd = _build_sql(db_cfg, sql_file, sql)
     ssh_host = db_cfg.get('ssh_host', '')
-    try:
-        if ssh_host and ssh_host not in ('127.0.0.1', 'localhost'):
-            client = _ssh_connect({
-                'ssh_host': ssh_host, 'ssh_port': db_cfg.get('ssh_port', 22),
-                'ssh_user': db_cfg.get('ssh_user', 'root'), 'ssh_pass': db_cfg.get('ssh_pass', '')
-            })
-            try:
-                _ssh_exec(client, cmd, timeout=15)
-            finally:
-                client.close()
+    err_msg = ""
+    if ssh_host and ssh_host not in ('127.0.0.1', 'localhost'):
+        cmd = _build_sql(db_cfg, sql_file, sql)
+        client = _ssh_connect({
+            'ssh_host': ssh_host, 'ssh_port': db_cfg.get('ssh_port', 22),
+            'ssh_user': db_cfg.get('ssh_user', 'root'), 'ssh_pass': db_cfg.get('ssh_pass', '')
+        })
+        try:
+            out, err, ec = _ssh_exec(client, cmd, timeout=15)
+            if ec != 0:
+                err_msg = (err or out or f"exit code {ec}").strip()[:500]
+        finally:
+            client.close()
+    else:
+        # 本地执行：用 Python 写 SQL 文件，再用 isql 执行（兼容 Windows/Linux）
+        import platform
+        try:
+            with open(sql_file, 'w', encoding='utf-8') as f:
+                f.write(sql)
+        except Exception:
+            pass
+        qt = shlex.quote(f"{db_cfg.get('user','SYSDBA')}/{db_cfg.get('pass','')}" if db_cfg.get('pass') else db_cfg.get('user','SYSDBA'))
+        isql = f"{db_cfg.get('isql','isql')} -h {db_cfg.get('host','127.0.0.1')} -p {db_cfg.get('port',2003)} -d {db_cfg.get('dbname','OSRDB')} -U {qt}"
+        if platform.system() == 'Windows':
+            cmd = f"cmd /c \"{isql} < {sql_file} && del {sql_file}\""
         else:
-            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=15)
-            if r.returncode != 0 and (r.stderr or r.stdout):
-                print(f"[persist] exec failed rc={r.returncode}: {r.stderr[:200] or r.stdout[:200]}")
-    except Exception as e:
-        import traceback
-        print(f"[persist] exec error: {e}")
+            cmd = f"{isql} < {sql_file} 2>&1; rm -f {sql_file}"
+        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=15)
+        if r.returncode != 0:
+            err_msg = (r.stderr or r.stdout or f"exit code {r.returncode}").strip()[:500]
+        # 检查是否输出了数据库错误（isql 可能返回 0 但仍然失败）
+        output = (r.stdout + r.stderr).lower()
+        if not err_msg and any(kw in output for kw in ('error', 'fail', 'unable', 'cannot', '拒绝', '失败', '错误')):
+            err_msg = (r.stderr or r.stdout or "数据库执行失败").strip()[:500]
+    if err_msg:
+        raise RuntimeError(err_msg)
 
 
 LOG_TABLE = 'OSCAR_LOG_COLLECT'

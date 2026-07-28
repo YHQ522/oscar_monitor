@@ -149,20 +149,19 @@ document.getElementById('configForm').addEventListener('submit', async function(
         log_enabled: document.getElementById('cfgLogEnabled').checked,
         server_db_enabled: document.getElementById('cfgServerDbEnabled').checked
     };
-    const resp = await apiFetch('/api/config', {
-        method: 'PUT',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(data)
-    });
-    if (resp.status === 'ok') {
-        config = data;
-        document.getElementById('configResult').className = 'text-success small';
-        document.getElementById('configResult').textContent = '保存成功';
-        setTimeout(() => { document.getElementById('configResult').textContent = ''; }, 3000);
-    } else {
-        document.getElementById('configResult').className = 'text-danger small';
-        document.getElementById('configResult').textContent = '保存失败: ' + (resp.error || '');
-    }
+    try {
+        const resp = await apiFetch('/api/config', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        if (resp.status === 'ok') {
+            config = data;
+            swalSuccess('系统配置已保存');
+        } else {
+            swalError(resp.error || '保存失败');
+        }
+    } catch (e) { swalError(e.message); }
 });
 
 async function testLogDb() {
@@ -187,11 +186,14 @@ async function testLogDb() {
             body: JSON.stringify(data)
         });
         let h = '';
-        if (r.ssh !== undefined) h += '<span class="small text-' + (r.ssh.ok ? 'success' : 'danger') + '">SSH: ' + r.ssh.msg + '</span> ';
-        if (r.db !== undefined) h += '<span class="small text-' + (r.db.ok ? 'success' : 'danger') + '">DB: ' + r.db.msg + '</span>';
+        if (r.error) { h = '<span class="small text-danger">❌ '+escapeHtml(r.error)+'</span>'; }
+        else {
+            if (r.ssh) h += '<span class="small text-' + (r.ssh.ok ? 'success' : 'danger') + '">SSH: ' + escapeHtml(r.ssh.msg) + '</span> ';
+            if (r.db) h += '<span class="small text-' + (r.db.ok ? 'success' : 'danger') + '">DB: ' + escapeHtml(r.db.msg) + '</span>';
+        }
         document.getElementById('configResult').innerHTML = h || '<span class="text-muted small">无结果</span>';
     } catch(e) {
-        document.getElementById('configResult').innerHTML = '<span class="text-danger small">' + e.message + '</span>';
+        document.getElementById('configResult').innerHTML = '<span class="text-danger small">网络异常: ' + escapeHtml(e.message) + '</span>';
     }
 }
 

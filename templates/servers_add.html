@@ -184,7 +184,7 @@ toggleAddDbConfig();
 function checkPersistEnabled(cb) {
     if (!logEnabled && cb.checked) {
         cb.checked = false;
-        Swal.fire({icon:'warning',title:'功能未启用',text:'全局日志持久化未启用，请先在系统配置中开启"启用日志持久化"。', confirmButtonText:'知道了'});
+        Swal.fire({...SWAL_BASE, icon:'info', title:'功能未启用', html:'<div class="swal-msg">全局日志持久化未启用，请先在系统配置中开启"启用日志持久化"。</div>', confirmButtonText:'知道了'});
         return false;
     }
     return true;
@@ -251,11 +251,13 @@ async function submitAdd(e) {
         enabled_os_checks: Array.from(document.querySelectorAll('.add-os-check:checked')).map(c => c.value),
         apps: collectApps('add'),
     };
-    const resp = await apiFetch('/api/servers', {
-        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)
-    });
-    if (resp.status === 'ok') location.href = '/servers';
-    else alert('添加失败: ' + (resp.error || ''));
+    try {
+        const resp = await apiFetch('/api/servers', {
+            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)
+        });
+        if (resp.status === 'ok') location.href = '/servers';
+        else swalError(resp.error || '未知错误');
+    } catch (e) { swalError(e.message); }
 }
 
 async function testAddConnection() {
@@ -292,10 +294,13 @@ async function testAddConnection() {
     try {
         const r = await apiFetch('/api/test-connection', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
         let h = '';
-        if (r.ssh) h += '<span class="text-'+(r.ssh.ok?'success':'danger')+' small">SSH: '+r.ssh.msg+'</span> ';
-        if (r.db) h += '<span class="text-'+(r.db.ok?'success':'danger')+' small">DB: '+r.db.msg+'</span>';
-        btn.innerHTML = h;
-    } catch(e) { btn.innerHTML = '<span class="text-danger small">'+e.message+'</span>'; }
+        if (r.error) { h = '<span class="text-danger small">❌ '+escapeHtml(r.error)+'</span>'; }
+        else {
+            if (r.ssh) h += '<span class="text-'+(r.ssh.ok?'success':'danger')+' small">SSH: '+escapeHtml(r.ssh.msg)+'</span> ';
+            if (r.db) h += '<span class="text-'+(r.db.ok?'success':'danger')+' small">DB: '+escapeHtml(r.db.msg)+'</span>';
+        }
+        btn.innerHTML = h || '<span class="text-muted small">无结果</span>';
+    } catch(e) { btn.innerHTML = '<span class="text-danger small">网络异常: '+escapeHtml(e.message)+'</span>'; }
 }
 
 document.getElementById('addForm').addEventListener('submit', submitAdd);

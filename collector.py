@@ -74,7 +74,7 @@ OS_CHECKS_LINUX = {
 OS_CHECKS_WIN = {
     "memory": "powershell -Command \"$os=Get-CimInstance Win32_OperatingSystem; Write-Host ('TotalMB='+[math]::Round($os.TotalVisibleMemorySize/1024)+' FreeMB='+[math]::Round($os.FreePhysicalMemory/1024)+' UsedMB='+[math]::Round(($os.TotalVisibleMemorySize-$os.FreePhysicalMemory)/1024))\"",
     "disk": "powershell -Command \"Get-PSDrive -PSProvider FileSystem | Where-Object {$_.Used -gt 0} | ForEach-Object {Write-Host ($_.Name+' '+[math]::Round($_.Used/1GB,1)+'GB/'+[math]::Round(($_.Used+$_.Free)/1GB,1)+'GB')}\"",
-    "cpu": "powershell -Command \"$cpu=Get-CimInstance Win32_Processor; Write-Host ('LoadPercentage='+$cpu.LoadPercentage); Write-Host '---'; Get-Process | Sort-Object CPU -Descending | Select-Object -First 5 Name,CPU | ForEach-Object {Write-Host ($_.Name+' '+$_.CPU)}\"",
+    "cpu": "powershell -Command \"$cpu=0;$src='snap';try{$s=Get-Counter '\\Processor(_Total)\\% Processor Time' -SampleInterval 1 -MaxSamples 2 -ea stop;$cpu=[math]::Round($s.CounterSamples[-1].CookedValue);$src='avg'}catch{$s1=(Get-CimInstance Win32_Processor).LoadPercentage;sleep -m 400;$s2=(Get-CimInstance Win32_Processor).LoadPercentage;sleep -m 400;$s3=(Get-CimInstance Win32_Processor).LoadPercentage;$cpu=[math]::Round(($s1+$s2+$s3)/3)};Write-Host('LoadPercentage='+$cpu+' Source='+$src);Write-Host '---';Get-Process|Sort CPU -Descending|Select -f 5 Name,CPU|%{Write-Host($_.Name+' '+$_.CPU)}\"",
     "install_path": "powershell -Command \"Get-ChildItem C:\\,D:\\ -Directory -Filter '*ShenTong*' -Recurse -Depth 3 -ErrorAction SilentlyContinue | Select-Object -First 5 FullName | ForEach-Object {Write-Host $_.FullName}\"",
     "os_errors": "powershell -Command \"Get-EventLog -LogName System -EntryType Error -Newest 30 2>$null | ForEach-Object {Write-Host ($_.TimeGenerated.ToString('yyyy-MM-dd HH:mm:ss')+' '+$_.Message.Substring(0,[Math]::Min(200,$_.Message.Length)))}\"",
     "db_log_errors": "powershell -Command \"Get-ChildItem C:\\\\,D:\\\\ -Filter 'elog*' -Recurse -Depth 4 -ErrorAction SilentlyContinue | Select-Object -First 3 | ForEach-Object { Write-Host ('===FILE:'+$_.FullName+'==='); Get-Content $_.FullName -Tail 500 -ErrorAction SilentlyContinue }\"",
@@ -229,8 +229,13 @@ def _build_sql_cmd(server_config, sql, sql_file):
     isql = f"{isql_cmd} -h {db_host} -p {db_port} -d {db_name} -U {qt}"
 
     if _is_win(server_config):
-        sql_win = sql.replace('%', '%%')
-        return (sql, f"cmd /c \"(echo {sql_win}) > {sql_file} && {isql} < {sql_file} && del {sql_file}\"")
+        # Windows: 用 Python 写 SQL 文件，避免 cmd echo 的特殊字符问题
+        try:
+            with open(sql_file, 'w', encoding='utf-8') as f:
+                f.write(sql)
+        except Exception:
+            pass
+        return (sql, f"cmd /c \"{isql} < {sql_file} && del {sql_file}\"")
     else:
         return (sql, f"cat > {sql_file} << 'OSCAREOF'\n{sql}\nOSCAREOF\n{isql} < {sql_file} 2>&1; R=$?; rm -f {sql_file}; exit $R")
 
@@ -440,6 +445,29 @@ def collect_os_info(server_config, enabled_os_checks):
         return results
 
     sep = "OSCAR_OS_SEP"
+    if use_ps and not need_ssh:
+        # Windows本地：逐个执行PowerShell命令，避免cmd.exe &引号嵌套问题
+        for check_name, cmd in cmds:
+            try:
+                proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+                raw = proc.stdout.strip()
+                if not raw and proc.stderr:
+                    raw = proc.stderr.strip()
+                result = {"output": strip_ansi(raw), "error": "", "exit_code": proc.returncode}
+                if check_name in ('memory', 'disk', 'cpu'):
+                    parsed = parse_table_output(raw)
+                    if parsed:
+                        result['columns'] = parsed['columns']
+                        result['rows'] = parsed['rows']
+                    if check_name == 'cpu':
+                        m = re.search(r'LoadPercentage[= ]*(\d+)', raw)
+                        if m:
+                            result['load_1m'] = m.group(1)
+                results[check_name] = result
+            except Exception as e:
+                results[check_name] = {"output": "", "error": str(e), "exit_code": -1}
+        return results
+
     if use_ps:
         cmds_str = ' & echo ' + sep + ' & '.join(c for _, c in cmds)
         full_cmd = 'echo ' + sep + ' & ' + cmds_str + ' 2>&1'
@@ -513,10 +541,6 @@ def test_connection(server_config):
     if skip_db:
         results["db"]["ok"] = True
         results["db"]["msg"] = "跳过（未选数据库采集项）"
-        return results
-
-    if not _need_ssh(server_config):
-        results["db"]["msg"] = "本地测试需配置远程主机"
         return results
 
     db_pass = server_config.get('db_pass', '')

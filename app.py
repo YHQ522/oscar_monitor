@@ -156,6 +156,8 @@ def template_context():
 
 
 @app.route('/api/reset-password', methods=['POST'])
+@login_required
+@permission_required('admin')
 def api_reset_password():
     data = request.get_json(silent=True) or {}
     username = data.get('username', '').strip()
@@ -628,7 +630,7 @@ def api_test_log_db():
             client.close()
             result['ssh'] = {"ok": True, "msg": "SSH连接成功"}
         except Exception as e:
-            fix_map = SSH_FIX_LINUX
+            fix_map = SSH_FIX_WIN if ssh_host == '127.0.0.1' else SSH_FIX_LINUX
             result['ssh'] = {"ok": False, "msg": translate_error(str(e), SSH_ERROR_TRANSLATE, fix_map)}
             return jsonify(result)
 
@@ -648,7 +650,7 @@ def api_test_log_db():
         }, "select 1;")
         result['db'] = {"ok": True, "msg": "数据库连接成功"}
     except Exception as e:
-        result['db'] = {"ok": False, "msg": str(e)[:200]}
+        result['db'] = {"ok": False, "msg": translate_error(str(e), DB_ERROR_TRANSLATE)}
 
     return jsonify(result)
 
@@ -678,6 +680,85 @@ def api_stream():
         'Cache-Control': 'no-cache',
         'X-Accel-Buffering': 'no',
     })
+
+
+@app.route('/api/trends/<server_id>')
+
+
+@login_required
+def api_trends(server_id):
+    """返回最近采集趋势数据（连接数变化）"""
+    trends = []
+    with CACHE_LOCK:
+        cached = CACHE.get(server_id, {}).get('data')
+    if cached:
+        perf = cached.get('db_queries', {}).get('performance', {})
+        sessions = perf.get('session_count', {})
+        count = 0
+        if sessions.get('rows') and sessions['rows']:
+            try:
+                count = int(sessions['rows'][0][0])
+            except (ValueError, IndexError):
+                pass
+        trends.append({
+            'ts': cached.get('timestamp', ''),
+            'sessions': count,
+        })
+    return jsonify(trends)
+
+
+@app.route('/api/servers/<server_id>/export')
+@login_required
+def api_export(server_id):
+    """导出采集数据为 CSV"""
+    server = get_server_by_id(server_id)
+    if not server:
+        return jsonify({"error": "服务不存在"}), 404
+    with CACHE_LOCK:
+        cached = CACHE.get(server_id, {}).get('data')
+    if not cached:
+        return jsonify({"error": "暂无数据，请先采集"}), 404
+
+    import csv
+    import io
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['服务器', server.get('name') or server.get('ssh_host', '')])
+    writer.writerow(['采集时间', cached.get('timestamp', '')])
+    writer.writerow([])
+
+    # OS info
+    os_info = cached.get('os_info', {})
+    if os_info:
+        writer.writerow(['=== 操作系统信息 ==='])
+        for ck, cr in os_info.items():
+            writer.writerow([OS_CHECK_LABELS.get(ck, ck)])
+            if cr.get('columns') and cr.get('rows'):
+                writer.writerow(cr['columns'])
+                for row in cr['rows']:
+                    writer.writerow(row)
+            elif cr.get('output'):
+                writer.writerow([cr['output']])
+            writer.writerow([])
+
+    # DB queries
+    db_queries = cached.get('db_queries', {})
+    for cat, queries in db_queries.items():
+        writer.writerow([f'=== {QUERY_SETS.get(cat, {}).get("label", cat)} ==='])
+        for qn, qr in queries.items():
+            writer.writerow([QUERY_LABELS.get(qn, qn)])
+            if qr.get('columns') and qr.get('rows'):
+                writer.writerow(qr['columns'])
+                for row in qr['rows']:
+                    writer.writerow(row)
+            writer.writerow([])
+
+    csv_content = output.getvalue()
+    return Response(
+        csv_content,
+        mimetype='text/csv',
+        headers={'Content-Disposition': f'attachment; filename={server_id}_export.csv'}
+    )
 
 
 def auto_collect_job():
