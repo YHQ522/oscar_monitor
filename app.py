@@ -25,6 +25,7 @@ app = Flask(__name__,
 app.config['SECRET_KEY'] = os.urandom(24).hex()
 app.config['JSON_AS_ASCII'] = False
 app.config['PERMANENT_SESSION_LIFETIME'] = 1800
+app.jinja_env.auto_reload = True
 
 scheduler = None
 _collect_executor = None
@@ -81,6 +82,7 @@ MAX_TREND_POINTS = 288
 
 # 登录限速：{ip: [timestamp, ...]}
 LOGIN_ATTEMPTS = {}
+LOCKED_IPS = {}  # {ip: {'since': ts, 'username': str, 'count': int}}
 LOGIN_LOCK = threading.Lock()
 LOGIN_MAX_FAILURES = 5
 LOGIN_WINDOW = 300       # 5 分钟窗口
@@ -240,25 +242,33 @@ def internal_error(e):
 def login():
     if request.method == 'POST':
         client_ip = request.remote_addr or '127.0.0.1'
-        # ── 登录限速检查 ──
-        with LOGIN_LOCK:
-            now_ts = time.time()
-            attempts = [t for t in LOGIN_ATTEMPTS.get(client_ip, []) if now_ts - t < LOGIN_WINDOW]
-            if len(attempts) >= LOGIN_MAX_FAILURES:
-                oldest = min(attempts) if attempts else 0
-                if now_ts - oldest < LOGIN_BAN_DURATION:
-                    remaining = int((LOGIN_BAN_DURATION - (now_ts - oldest)) / 60) + 1
-                    return render_template('login.html', error=f'登录失败次数过多，请 {remaining} 分钟后再试')
-                else:
-                    attempts = []
-            LOGIN_ATTEMPTS[client_ip] = attempts
-
         username = request.form.get('username', '')
         password = request.form.get('password', '')
+
+        # 先尝试验证（admin 不受限速影响）
         user = check_login(username, password)
+
+        # ── 登录限速检查（admin 用户豁免）──
+        is_admin_user = user and user.get('is_admin')
+        if not is_admin_user:
+            with LOGIN_LOCK:
+                now_ts = time.time()
+                attempts = [t for t in LOGIN_ATTEMPTS.get(client_ip, []) if now_ts - t < LOGIN_WINDOW]
+                if len(attempts) >= LOGIN_MAX_FAILURES:
+                    oldest = min(attempts) if attempts else 0
+                    if now_ts - oldest < LOGIN_BAN_DURATION:
+                        remaining = int((LOGIN_BAN_DURATION - (now_ts - oldest)) / 60) + 1
+                        LOCKED_IPS[client_ip] = {'since': oldest, 'username': username or '?', 'count': len(attempts)}
+                        return render_template('login.html', error=f'登录失败次数过多，请 {remaining} 分钟后再试')
+                    else:
+                        attempts = []
+                        LOCKED_IPS.pop(client_ip, None)
+                LOGIN_ATTEMPTS[client_ip] = attempts
+
         if user:
             with LOGIN_LOCK:
                 LOGIN_ATTEMPTS.pop(client_ip, None)
+                LOCKED_IPS.pop(client_ip, None)
             session['logged_in'] = True
             session['username'] = username
             session['user'] = user
@@ -275,6 +285,45 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for('login'))
+
+
+@app.route('/api/admin/locked-ips')
+@login_required
+@permission_required('admin')
+def api_locked_ips():
+    """返回当前被封锁的 IP 列表"""
+    now_ts = time.time()
+    result = []
+    with LOGIN_LOCK:
+        for ip, info in list(LOCKED_IPS.items()):
+            since = info.get('since', 0)
+            if now_ts - since < LOGIN_BAN_DURATION:
+                remaining = max(0, int((LOGIN_BAN_DURATION - (now_ts - since)) / 60))
+                result.append({
+                    'ip': ip,
+                    'username': info.get('username', '?'),
+                    'count': info.get('count', 0),
+                    'since': time.strftime('%H:%M:%S', time.localtime(since)),
+                    'remaining_min': remaining
+                })
+            else:
+                LOCKED_IPS.pop(ip, None)
+    return jsonify({'locked': result})
+
+
+@app.route('/api/admin/unlock-ip', methods=['POST'])
+@login_required
+@permission_required('admin')
+def api_unlock_ip():
+    """解锁指定 IP"""
+    data = request.get_json(silent=True) or {}
+    ip = data.get('ip', '').strip()
+    if not ip:
+        return jsonify({'ok': False, 'msg': 'IP 不能为空'})
+    with LOGIN_LOCK:
+        LOGIN_ATTEMPTS.pop(ip, None)
+        LOCKED_IPS.pop(ip, None)
+    return jsonify({'ok': True, 'msg': f'已解锁 {ip}'})
 
 
 @app.route('/help')
@@ -1098,4 +1147,4 @@ if __name__ == '__main__':
         import webbrowser
         threading.Thread(target=lambda: (time.sleep(1.5), webbrowser.open(f'http://localhost:{args.port}')), daemon=True).start()
 
-    app.run(host='0.0.0.0', port=args.port, debug=False)
+    app.run(host='0.0.0.0', port=args.port, debug=False, use_reloader=False)

@@ -43,6 +43,16 @@
     </table>
 </div>
 
+<div class="card mt-3 border-warning" id="lockedCard">
+    <div class="card-header py-1 d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-lock"></i> <strong>登录锁定</strong></span>
+        <button class="btn btn-outline-light btn-sm py-0 border-2" onclick="refreshLocked()"><i class="bi bi-arrow-clockwise"></i> 刷新</button>
+    </div>
+    <div class="card-body p-2">
+        <div id="lockedList" class="small text-muted">加载中...</div>
+    </div>
+</div>
+
 <div class="modal fade" id="userModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -160,6 +170,49 @@ async function delUser(username) {
     if (r.status === 'ok') { swalSuccess(r.msg); location.reload(); }
     else swalError(r.msg);
 }
+
+// ── 登录锁定管理 ──
+async function refreshLocked() {
+    const list = document.getElementById('lockedList');
+    try {
+        const data = await apiFetch('/api/admin/locked-ips');
+        const locked = data.locked || [];
+        if (locked.length === 0) {
+            list.innerHTML = '<div class="text-center py-1"><i class="bi bi-check-circle text-success"></i> 当前没有被封锁的 IP</div>';
+            return;
+        }
+        list.innerHTML = locked.map(l => `
+            <div class="d-flex justify-content-between align-items-center border-bottom py-1">
+                <div>
+                    <span class="badge bg-secondary me-1">${escapeHtml(l.ip)}</span>
+                    <span>用户 <strong>${escapeHtml(l.username)}</strong></span>
+                    <span class="text-muted ms-2">失败 ${l.count} 次 · 封锁于 ${l.since}</span>
+                    <span class="badge bg-danger ms-1">剩余 ${l.remaining_min} 分钟</span>
+                </div>
+                <button class="btn btn-outline-success btn-sm py-0" onclick="unlockIp('${escapeHtml(l.ip)}')">
+                    <i class="bi bi-unlock"></i> 解锁
+                </button>
+            </div>
+        `).join('');
+    } catch(e) {
+        list.innerHTML = '<div class="text-center py-1 text-danger">加载失败，请刷新重试</div>';
+    }
+}
+
+async function unlockIp(ip) {
+    const cfm = await swalConfirm(`确定解锁 IP ${ip} 吗？该 IP 将可以立即重新登录。`, '解锁确认');
+    if (!cfm.isConfirmed) return;
+    const r = await apiFetch('/api/admin/unlock-ip', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ip: ip})
+    });
+    if (r.ok) { swalSuccess(r.msg); refreshLocked(); }
+    else swalError(r.msg);
+}
+
+// 页面加载时刷新锁定列表
+refreshLocked();
 {% endraw %}
 </script>
 {% endblock %}
