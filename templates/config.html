@@ -85,15 +85,8 @@
                         </div>
                     </div>
                 </div>
-                <hr class="my-2">
-                <div class="row g-2">
-                    <div class="col-12">
-                        <label class="form-label small">告警通知 Webhook URL (钉钉/企业微信)</label>
-                        <input class="form-control form-control-sm" id="cfgWebhookUrl" placeholder="https://oapi.dingtalk.com/robot/send?access_token=...">
-                        <small class="text-muted">检测到死锁/磁盘>90%时自动推送，留空不启用</small>
-                    </div>
-                </div>
             </div>
+        </div>
 
         <div class="text-end">
             <span id="configResult" class="me-2 small"></span>
@@ -132,7 +125,6 @@ function loadForm() {
     document.getElementById('cfgLogDbSshPort').value = db.ssh_port || 22;
     document.getElementById('cfgLogDbSshUser').value = db.ssh_user || 'root';
     document.getElementById('cfgLogDbSshPass').value = db.ssh_pass || '';
-    document.getElementById('cfgWebhookUrl').value = config.webhook_url || '';
     toggleLogDb();
 }
 
@@ -142,7 +134,6 @@ document.getElementById('configForm').addEventListener('submit', async function(
     document.getElementById('configResult').textContent = '保存中...';
     const data = {
         log_db: {
-            host: document.getElementById('cfgLogDbHost').value,
             port: parseInt(document.getElementById('cfgLogDbPort').value) || 2003,
             user: document.getElementById('cfgLogDbUser').value,
             pass: document.getElementById('cfgLogDbPass').value,
@@ -156,8 +147,7 @@ document.getElementById('configForm').addEventListener('submit', async function(
         log_retention_days: parseInt(document.getElementById('cfgRetentionDays').value) || 30,
         collect_workers: parseInt(document.getElementById('cfgWorkers').value) || 8,
         log_enabled: document.getElementById('cfgLogEnabled').checked,
-        server_db_enabled: document.getElementById('cfgServerDbEnabled').checked,
-        webhook_url: document.getElementById('cfgWebhookUrl').value.trim()
+        server_db_enabled: document.getElementById('cfgServerDbEnabled').checked
     };
     const resp = await apiFetch('/api/config', {
         method: 'PUT',

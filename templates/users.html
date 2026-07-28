@@ -146,7 +146,7 @@ async function saveUser() {
         alert(r.msg);
         if (r.status === 'ok') location.reload();
     } else {
-        if (!data.password) { Swal.fire({icon:'warning',title:'请输入密码',confirmButtonColor:'#0d6efd'}); return; }
+        if (!data.password) { alert('请输入密码'); return; }
         const r = await apiFetch('/api/users', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
         alert(r.msg);
         if (r.status === 'ok') location.reload();
@@ -154,9 +154,9 @@ async function saveUser() {
 }
 
 async function delUser(username) {
-    if (!(await swalConfirm('删除用户','确定删除用户 '+username+' ?','删除'))) return;
+    if (!confirm('确定删除用户 ' + username + ' ?')) return;
     const r = await apiFetch('/api/users/' + username, {method:'DELETE'});
-    Swal.fire({icon:r.status==='ok'?'success':'error',title:r.msg,confirmButtonColor:'#0d6efd'});
+    alert(r.msg);
     if (r.status === 'ok') location.reload();
 }
 {% endraw %}

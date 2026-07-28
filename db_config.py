@@ -1,11 +1,7 @@
 import json
 import uuid
 import threading
-import logging
 from persist import load_config as load_global_config, _exec_sql, _get_table_columns
-from sql_helpers import (sql_str, sql_str_null, sql_int, sql_num, sql_bool, table)
-
-_log = logging.getLogger('oscar_monitor.db_config')
 
 _lock = threading.Lock()
 
@@ -34,12 +30,10 @@ def _db_enabled():
 
 
 def _ensure_servers_table():
-    db = _cfg()
     if not _db_enabled():
         return False
-    tbl = table(SERVERS_TABLE)
     _exec_sql(db, f"""
-create table if not exists {tbl} (
+create table if not exists {SERVERS_TABLE} (
     id           varchar(20) primary key,
     name         varchar(200),
     ssh_host     varchar(200),
@@ -70,12 +64,10 @@ create table if not exists {tbl} (
 
 
 def _ensure_users_table():
-    db = _cfg()
     if not _db_enabled():
         return False
-    tbl = table(USERS_TABLE)
     _exec_sql(db, f"""
-create table if not exists {tbl} (
+create table if not exists {USERS_TABLE} (
     username    varchar(100) primary key,
     password    varchar(200),
     is_admin    boolean default false,
@@ -87,14 +79,13 @@ create table if not exists {tbl} (
 
 
 def load_servers_from_db():
-    db = _cfg()
     if not _db_enabled() or not _ensure_servers_table():
         return None
     try:
-        tbl = table(SERVERS_TABLE)
+        # Execute query and parse
         import persist
         sql_file = persist._temp_sql()
-        cmd = persist._build_sql(db, sql_file, f"select * from {tbl} order by created_at;")
+        cmd = persist._build_sql(db, sql_file, "select * from " + SERVERS_TABLE + " order by created_at;")
         import subprocess
         from collector import _ssh_connect, _ssh_exec
         ssh_host = db.get('ssh_host', '')
@@ -144,53 +135,45 @@ def save_server_to_db(server):
     db = _cfg()
     if not _db_enabled() or not _ensure_servers_table():
         return
-    tbl = table(SERVERS_TABLE)
+    safe = lambda v: (str(v or '')).replace("'", "''")
     cats = json.dumps(server.get('enabled_categories', []), ensure_ascii=False)
     osch = json.dumps(server.get('enabled_os_checks', []), ensure_ascii=False)
     apps = json.dumps(server.get('apps', []), ensure_ascii=False)
     values = [
-        sql_str(server.get('id'), 20), sql_str(server.get('name'), 200), sql_str(server.get('ssh_host'), 200),
-        sql_int(server.get('ssh_port', 22)), sql_str(server.get('ssh_user'), 100), sql_str(server.get('ssh_pass'), 200),
-        sql_str(server.get('db_host'), 200), sql_int(server.get('db_port', 2003)), sql_str(server.get('db_user'), 100),
-        sql_str(server.get('db_pass'), 200), sql_str(server.get('db_name'), 100), sql_str(server.get('isql_cmd', 'isql'), 200),
-        sql_int(server.get('auto_refresh', 0)), sql_str(server.get('os_type', 'linux'), 20),
-        sql_bool(server.get('in_control', True)), sql_bool(server.get('persist_enabled', False)),
-        sql_str(server.get('svc_name'), 100), sql_str(server.get('svc_mgr', 'systemctl'), 50),
-        sql_str(server.get('svc_start_cmd'), 1000), sql_str(server.get('svc_stop_cmd'), 1000),
-        sql_str(cats, 5000), sql_str(osch, 5000), sql_str(apps, 5000)
+        safe(server.get('id')), safe(server.get('name')), safe(server.get('ssh_host')),
+        server.get('ssh_port', 22), safe(server.get('ssh_user')), safe(server.get('ssh_pass')),
+        safe(server.get('db_host')), server.get('db_port', 2003), safe(server.get('db_user')),
+        safe(server.get('db_pass')), safe(server.get('db_name')), safe(server.get('isql_cmd', 'isql')),
+        server.get('auto_refresh', 0), safe(server.get('os_type', 'linux')),
+        server.get('in_control', True), server.get('persist_enabled', False),
+        safe(server.get('svc_name')), safe(server.get('svc_mgr', 'systemctl')),
+        safe(server.get('svc_start_cmd')), safe(server.get('svc_stop_cmd')),
+        safe(cats), safe(osch), safe(apps)
     ]
     cols = "id,name,ssh_host,ssh_port,ssh_user,ssh_pass,db_host,db_port,db_user,db_pass,db_name,isql_cmd,auto_refresh,os_type,in_control,persist_enabled,svc_name,svc_mgr,svc_start_cmd,svc_stop_cmd,enabled_categories,enabled_os_checks,apps"
-    vals = ', '.join(values)
-    sid = sql_str(server.get('id'), 20)
+    vals = ','.join(str(v) if isinstance(v, (int, float)) else f"'{v}'" for v in values)
     try:
-        _exec_sql(db, f"delete from {tbl} where id={sid};")
-        _exec_sql(db, f"insert into {tbl} ({cols}) values ({vals});")
-        _log.info("saved server %s to DB", server.get('name') or server.get('id'))
+        _exec_sql(db, f"delete from {SERVERS_TABLE} where id='{safe(server.get('id'))}';")
+        _exec_sql(db, f"insert into {SERVERS_TABLE} ({cols}) values ({vals});")
+        print(f"[db_config] saved server {server.get('name') or server.get('id')} to DB")
     except Exception as e:
-        _log.error("save server error: %s", e)
+        print(f"[db_config] save server error: {e}")
 
 
 def delete_server_from_db(server_id):
-    db = _cfg()
     if not _db_enabled() or not _ensure_servers_table():
         return
-    tbl = table(SERVERS_TABLE)
-    sid = sql_str(server_id, max_len=20)
-    _exec_sql(db, f"delete from {tbl} where id={sid};")
+    _exec_sql(db, f"delete from {SERVERS_TABLE} where id='{str(server_id).replace(chr(39),chr(39)+chr(39))}';")
 
 
 def sync_users_to_db(users):
-    db = _cfg()
     if not _db_enabled() or not _ensure_users_table():
         return
-    tbl = table(USERS_TABLE)
+    safe = lambda v: (str(v or '')).replace("'", "''")
+    perms_json = lambda u: json.dumps(u.get('perms', []), ensure_ascii=False)
     for u in users:
-        uname = sql_str(u.get('username'), max_len=100)
-        upass = sql_str(u.get('password', ''), max_len=200)
-        uadmin = sql_bool(u.get('is_admin', False))
-        uperms = sql_str(json.dumps(u.get('perms', []), ensure_ascii=False), max_len=2000)
         try:
-            _exec_sql(db, f"delete from {tbl} where username={uname};")
-            _exec_sql(db, f"insert into {tbl} (username,password,is_admin,perms) values ({uname},{upass},{uadmin},{uperms});")
+            _exec_sql(db, f"delete from {USERS_TABLE} where username='{safe(u.get('username'))}';")
+            _exec_sql(db, f"insert into {USERS_TABLE} (username,password,is_admin,perms) values ('{safe(u.get('username'))}','{safe(u.get('password'))}',{u.get('is_admin',False)},'{safe(perms_json(u))}');")
         except Exception as e:
-            _log.error("sync_users error for %s: %s", u.get('username'), e)
+            print(f"[sync_users] error for {u.get('username')}: {e}")

@@ -169,20 +169,11 @@ cli_install() {
 
     echo "[5/6] 注册服务..."
     cat > /etc/systemd/system/${APP_NAME}.service << EOF
-[Unit]
-Description=管控平台 v${VERSION}
-After=network.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=${INSTALL_DIR}
+[Unit];Description=管控平台 v${VERSION};After=network.target
+[Service];Type=simple;User=root;WorkingDirectory=${INSTALL_DIR}
 ExecStart=${EXEC} --port ${PORT}
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
+Restart=always;RestartSec=5
+[Install];WantedBy=multi-user.target
 EOF
     systemctl daemon-reload; systemctl enable ${APP_NAME}; systemctl start ${APP_NAME}
     sleep 2

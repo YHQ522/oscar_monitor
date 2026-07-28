@@ -22,14 +22,6 @@
     {% endif %}
 </div>
 {% else %}
-<!-- 全局摘要卡片 -->
-<div class="row g-2 mb-3" id="globalSummary" style="display:none;">
-    <div class="col-6 col-md-3"><div class="card text-bg-primary"><div class="card-body p-2 text-center"><h5 class="mb-0" id="sumOnline">0</h5><small>在线服务</small></div></div></div>
-    <div class="col-6 col-md-3"><div class="card text-bg-success"><div class="card-body p-2 text-center"><h5 class="mb-0" id="sumSessions">0</h5><small>总连接数</small></div></div></div>
-    <div class="col-6 col-md-3"><div class="card text-bg-warning"><div class="card-body p-2 text-center"><h5 class="mb-0" id="sumDeadlocks">0</h5><small>死锁数</small></div></div></div>
-    <div class="col-6 col-md-3"><div class="card text-bg-danger"><div class="card-body p-2 text-center"><h5 class="mb-0" id="sumAlerts">0</h5><small>告警</small></div></div></div>
-</div>
-
 <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3" id="serverCards">
     {% for s in servers %}
     <div class="col">
@@ -310,26 +302,6 @@ function updateSummary(serverId, data) {
     }
 
     summary.innerHTML = html || '<span class="text-success small">采集完成</span>';
-    updateGlobalSummary();
-}
-
-function updateGlobalSummary() {
-    const cards = document.querySelectorAll('.server-card');
-    let online = 0, sessions = 0, deadlocks = 0;
-    cards.forEach(card => {
-        const badge = card.querySelector('.status-badge');
-        if (badge && badge.textContent !== '待采集' && badge.textContent !== '失败' && badge.textContent !== '刷新...') online++;
-        const text = card.querySelector('.card-body').textContent || '';
-        const cm = text.match(/连接数\s*(\d+)/);
-        if (cm) sessions += parseInt(cm[1]) || 0;
-        const dm = text.match(/死锁\s*(\d+)/);
-        if (dm) deadlocks += parseInt(dm[1]) || 0;
-    });
-    document.getElementById('sumOnline').textContent = online;
-    document.getElementById('sumSessions').textContent = sessions;
-    document.getElementById('sumDeadlocks').textContent = deadlocks;
-    document.getElementById('sumAlerts').textContent = deadlocks;
-    document.getElementById('globalSummary').style.display = cards.length > 0 ? '' : 'none';
 }
 
 {% endraw %}

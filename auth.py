@@ -2,7 +2,6 @@ import os
 import sys
 import json
 import hashlib
-import secrets
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
@@ -21,36 +20,9 @@ PERMISSIONS = {
 
 ALL_PERMS = list(PERMISSIONS.keys())
 
-PBKDF2_ITERATIONS = 100000
-PBKDF2_PREFIX = 'pbkdf2:'
-
 
 def _hash(pwd):
-    """Hash a password using PBKDF2-SHA256 with a random salt."""
-    salt = secrets.token_bytes(16)
-    dk = hashlib.pbkdf2_hmac('sha256', pwd.encode(), salt, PBKDF2_ITERATIONS)
-    return PBKDF2_PREFIX + salt.hex() + ':' + dk.hex()
-
-
-def _verify(stored, password):
-    """Verify a password against a stored hash. Supports both old SHA-256 and new PBKDF2."""
-    if not stored:
-        return False
-    if stored.startswith(PBKDF2_PREFIX):
-        try:
-            _, salt_hex, hash_hex = stored.split(':')
-            salt = bytes.fromhex(salt_hex)
-            dk = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, PBKDF2_ITERATIONS)
-            return dk.hex() == hash_hex
-        except (ValueError, IndexError):
-            return False
-    # Legacy SHA-256 (no salt) – keep backward compatibility
-    return stored == hashlib.sha256(password.encode()).hexdigest()
-
-
-def _needs_upgrade(stored):
-    """Check if stored hash uses old SHA-256 format."""
-    return bool(stored) and not stored.startswith(PBKDF2_PREFIX)
+    return hashlib.sha256(pwd.encode()).hexdigest()
 
 
 _users_cache = None
@@ -131,10 +103,7 @@ def save_users(users):
 def check_login(username, password):
     users = load_users()
     for u in users:
-        if u.get('username') == username and _verify(u.get('password', ''), password):
-            if _needs_upgrade(u.get('password', '')):
-                u['password'] = _hash(password)
-                save_users(users)
+        if u.get('username') == username and u.get('password') == _hash(password):
             return u
     return None
 
@@ -145,7 +114,7 @@ def change_password(username, old_pwd, new_pwd):
     users = load_users()
     for u in users:
         if u.get('username') == username:
-            if not _verify(u.get('password', ''), old_pwd):
+            if u.get('password') != _hash(old_pwd):
                 return False, "原密码错误"
             u['password'] = _hash(new_pwd)
             save_users(users)

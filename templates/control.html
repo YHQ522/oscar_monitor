@@ -204,7 +204,7 @@
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 <script>
-let serverList = {{ servers_safe|tojson }};
+let serverList = {{ servers|tojson }};
 {% raw %}
 
 let svcModal = null;
@@ -263,10 +263,10 @@ async function saveSvcModal() {
                 cell.innerHTML = '<span class="small">' + name + '</span> ' + (isWin ? '' : '<span class="badge bg-light text-dark small">' + displayMgr + '</span> ') + '<button class="btn btn-link btn-sm p-0 ms-1" onclick="openSvcModal(\'' + serverId + '\')" title="编辑服务配置"><i class="bi bi-pencil-square small"></i></button>';
             }
         } else {
-            Swal.fire({icon:'error',title:'保存失败',text:(resp.error||''),confirmButtonColor:'#dc3545'});
+            alert('保存失败: ' + (resp.error || ''));
         }
     } catch (e) {
-        Swal.fire({icon:'error',title:'保存失败',text:e.message,confirmButtonColor:'#dc3545'});
+        alert('保存失败: ' + e.message);
     }
 }
 
@@ -278,7 +278,7 @@ async function controlAction(serverId, action, silent) {
     if (!silent) {
         if (action !== 'status') {
             const labels = {start:'启动', stop:'停止', restart:'重启'};
-            if (!(await swalConfirm(labels[action]+'服务 '+srvName, '', '确定'+labels[action]))) return;
+            if (!confirm(`确定${labels[action]}服务 ${srvName} 吗？`)) return;
         }
         const labels = {start:'启动中...', stop:'停止中...', restart:'重启中...', status:'查询中...'};
         badge.textContent = labels[action] || action;
@@ -338,7 +338,7 @@ async function appControlAction(serverId, appName, action) {
     const srvName = srv ? (srv.name || srv.ssh_host) : serverId;
     if (action !== 'status') {
         const labels = {start:'启动', stop:'停止', restart:'重启'};
-        if (!(await swalConfirm(labels[action]+'应用 '+appName, srvName, '确定'+labels[action]))) return;
+        if (!confirm(`确定${labels[action]}应用 ${appName} (${srvName}) 吗？`)) return;
     }
     try {
         const result = await apiFetch('/api/servers/' + serverId + '/app-control', {
@@ -425,10 +425,10 @@ async function saveAppSvcModal() {
             appSvcModal.hide();
             location.reload();
         } else {
-            Swal.fire({icon:'error',title:'保存失败',text:(resp.error||''),confirmButtonColor:'#dc3545'});
+            alert('保存失败: ' + (resp.error || ''));
         }
     } catch (e) {
-        Swal.fire({icon:'error',title:'保存失败',text:e.message,confirmButtonColor:'#dc3545'});
+        alert('保存失败: ' + e.message);
     }
 }
 

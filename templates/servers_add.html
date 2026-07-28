@@ -237,7 +237,7 @@ async function submitAdd(e) {
         method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)
     });
     if (resp.status === 'ok') location.href = '/servers';
-    else Swal.fire({icon:'error',title:'添加失败',text:(resp.error||''),confirmButtonColor:'#dc3545'});
+    else alert('添加失败: ' + (resp.error || ''));
 }
 
 async function testAddConnection() {

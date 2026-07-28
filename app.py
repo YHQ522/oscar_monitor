@@ -1,199 +1,33 @@
-﻿import os
+import os
 import sys
 import json
+import uuid
 import threading
 import time
-import logging
-from collections import deque
+import traceback
 from functools import wraps
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from flask import Flask, session, request, jsonify, redirect, url_for
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session, Response
 
-from auth import has_permission
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S',
-)
-_log = logging.getLogger('oscar_monitor')
+from auth import check_login, change_password, add_user, update_user, delete_user, load_users as load_auth_users, has_permission, PERMISSIONS
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 if getattr(sys, 'frozen', False):
     DATA_DIR = os.path.join(os.path.dirname(sys.executable), 'data')
     BASE_DIR = sys._MEIPASS
 
-START_TIME = time.time()
-
 app = Flask(__name__,
             template_folder=os.path.join(BASE_DIR, 'templates'),
             static_folder=os.path.join(BASE_DIR, 'static'))
-app.config['SECRET_KEY'] = os.environ.get('OSCAR_SECRET_KEY', os.urandom(24).hex())
+app.config['SECRET_KEY'] = os.urandom(24).hex()
 app.config['JSON_AS_ASCII'] = False
 app.config['PERMANENT_SESSION_LIFETIME'] = 1800
 
-# ── Rate limiter (in-memory, auto-cleanup every 5 min) ────
-_LOGIN_ATTEMPTS = {}  # {ip: [(ts1, ts2, ...)]}
-_RATE_LOCK = threading.Lock()
-_MAX_FAILURES = 5
-_BLOCK_SECONDS = 900  # 15 min
-_FAIL_WINDOW = 300    # 5 min sliding window
-
-
-def _check_rate_limit(ip):
-    now = time.time()
-    with _RATE_LOCK:
-        attempts = _LOGIN_ATTEMPTS.get(ip, [])
-        # prune old entries
-        attempts = [t for t in attempts if now - t < _FAIL_WINDOW]
-        _LOGIN_ATTEMPTS[ip] = attempts
-        if len(attempts) >= _MAX_FAILURES:
-            oldest = min(attempts)
-            if now - oldest < _BLOCK_SECONDS:
-                return False, f"登录失败次数过多，请{int((_BLOCK_SECONDS - (now - oldest)) / 60)}分钟后再试"
-            # block expired, reset
-            _LOGIN_ATTEMPTS[ip] = []
-        return True, None
-
-
-def _record_login_failure(ip):
-    with _RATE_LOCK:
-        _LOGIN_ATTEMPTS.setdefault(ip, []).append(time.time())
-
-
-# periodic cleanup of stale rate-limit entries (every 10 min, daemon)
-def _cleanup_rate_limits():
-    while True:
-        time.sleep(600)
-        now = time.time()
-        with _RATE_LOCK:
-            stale = [ip for ip, ts_list in _LOGIN_ATTEMPTS.items()
-                     if all(now - t > _BLOCK_SECONDS for t in ts_list)]
-            for ip in stale:
-                del _LOGIN_ATTEMPTS[ip]
-
-
-threading.Thread(target=_cleanup_rate_limits, daemon=True).start()
-
-# ── Audit log (append-only JSON lines, max 10k lines) ─────
-AUDIT_FILE = os.path.join(DATA_DIR, 'audit.jsonl')
-_AUDIT_LOCK = threading.Lock()
-_AUDIT_MAX = 10000
-
-
-def audit_log(action, detail, username=''):
-    """Write an audit entry. Auto-trims old entries if > _AUDIT_MAX lines."""
-    entry = {"time": time.strftime('%Y-%m-%d %H:%M:%S'), "user": username or "system",
-             "action": action, "detail": str(detail)[:500], "ip": request.remote_addr if request else ''}
-    with _AUDIT_LOCK:
-        try:
-            with open(AUDIT_FILE, 'a', encoding='utf-8') as f:
-                f.write(json.dumps(entry, ensure_ascii=False) + '\n')
-            # trim if too large (lazy, only on write)
-            if os.path.getsize(AUDIT_FILE) > _AUDIT_MAX * 200:
-                lines = []
-                with open(AUDIT_FILE, 'r', encoding='utf-8') as f:
-                    lines = f.readlines()
-                if len(lines) > _AUDIT_MAX:
-                    with open(AUDIT_FILE, 'w', encoding='utf-8') as f:
-                        f.writelines(lines[-_AUDIT_MAX:])
-        except Exception:
-            pass  # audit failure must not break app
-
-
-# ── Trend history (ring buffer, max 60 points = 30 min) ───
-_TREND_HISTORY = {}  # {server_id: deque(maxlen=60)}
-_TREND_LOCK = threading.Lock()
-
-
-def _record_trend(server_id, data):
-    """Store one data point per server, max 60 points."""
-    point = {"ts": time.strftime('%H:%M:%S'),
-             "sessions": _safe_int(data, 'db_queries.performance.session_count'),
-             "deadlocks": _safe_int(data, 'db_queries.performance.deadlock_count'),
-             "cpu": _safe_cpu(data),
-             "mem_pct": _safe_mem(data)}
-    with _TREND_LOCK:
-        if server_id not in _TREND_HISTORY:
-            _TREND_HISTORY[server_id] = deque(maxlen=60)
-        _TREND_HISTORY[server_id].append(point)
-
-
-def _safe_int(data, path):
-    try:
-        for key in path.split('.'):
-            data = data.get(key, {})
-        return int(data.get('rows', [[0]])[0][0]) if data else 0
-    except Exception:
-        return 0
-
-
-def _safe_cpu(data):
-    try:
-        raw = data.get('os_info', {}).get('cpu', {}).get('output', '')
-        m = __import__('re').search(r'LoadPercentage[= ]*(\d+)', raw)
-        if m: return int(m.group(1))
-        m = __import__('re').search(r'load average:\s*([\d.]+)', raw)
-        if m: return float(m.group(1))
-    except Exception:
-        pass
-    return None
-
-
-def _safe_mem(data):
-    try:
-        raw = data.get('os_info', {}).get('memory', {}).get('output', '')
-        m = __import__('re').search(r'TotalMB=(\d+).*?FreeMB=(\d+).*?UsedMB=(\d+)', raw)
-        if m:
-            total, used = int(m.group(1)), int(m.group(3))
-            return round(used / total * 100, 1) if total > 0 else None
-        m = __import__('re').search(r'Mem:\s+(\S+)\s+(\S+)\s+(\S+)', raw)
-        if m:
-            return None  # linux free -h outputs human-readable, skip for trend
-    except Exception:
-        pass
-    return None
-
-# ── Webhook alert (fire-and-forget, no queue) ─────────────
-_WEBHOOK_EXECUTOR = None
-
-
-def _get_webhook_executor():
-    global _WEBHOOK_EXECUTOR
-    if _WEBHOOK_EXECUTOR is None:
-        _WEBHOOK_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix='webhook')
-    return _WEBHOOK_EXECUTOR
-
-
-def send_alert(server_name, alert_type, message):
-    """Fire-and-forget webhook alert (non-blocking)."""
-    cfg = load_config()
-    url = cfg.get('webhook_url', '')
-    if not url:
-        return
-    payload = {"msgtype": "text", "text": {"content": f"[{alert_type}] {server_name}\n{message}"}}
-    _get_webhook_executor().submit(_do_webhook, url, payload)
-
-
-def _do_webhook(url, payload):
-    try:
-        import urllib.request
-        data = json.dumps(payload).encode('utf-8')
-        req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
-        urllib.request.urlopen(req, timeout=5)
-    except Exception:
-        pass  # webhook failure is non-critical
-
 scheduler = None
-try:
-    from apscheduler.schedulers.background import BackgroundScheduler
-    scheduler = BackgroundScheduler()
-    scheduler.start()
-except Exception:
-    _log.warning('APScheduler not available; auto-collect disabled')
-
 _collect_executor = None
+
 
 def _get_executor():
     global _collect_executor
@@ -203,26 +37,72 @@ def _get_executor():
         _collect_executor = ThreadPoolExecutor(max_workers=workers)
     return _collect_executor
 
+
 def _reinit_executor():
     global _collect_executor
     if _collect_executor:
         _collect_executor.shutdown(wait=False)
     _collect_executor = None
 
-from collector import (collect_all, test_connection, db_control, app_control,
-                       QUERY_SETS, QUERY_LABELS, OS_CHECKS, OS_CHECK_LABELS)
-from collector import (_ssh_connect, translate_error,
-                       SSH_ERROR_TRANSLATE, SSH_FIX_LINUX)
-from persist import (load_config, save_config,
-                     persist_os_error, persist_db_error, persist_slow_sql,
-                     cleanup_old_logs, query_logs)
-from db_config import load_servers_from_db, save_server_to_db, delete_server_from_db
 
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler
+    scheduler = BackgroundScheduler()
+    scheduler.start()
+except Exception:
+    pass
+
+from collector import collect_all, test_connection, db_control, app_control, QUERY_SETS, QUERY_LABELS, OS_CHECKS, OS_CHECK_LABELS
+from collector import _ssh_connect, _ssh_exec, _need_ssh, translate_error, SSH_ERROR_TRANSLATE, DB_ERROR_TRANSLATE, SSH_FIX_WIN, SSH_FIX_LINUX, strip_ansi, safe_decode
+from persist import load_config, save_config, persist_os_error, persist_db_error, persist_slow_sql, cleanup_old_logs, query_logs
+from db_config import load_servers_from_db, save_server_to_db, delete_server_from_db
 CONFIG_FILE = os.path.join(DATA_DIR, 'servers.json')
 CONFIG_LOCK = threading.Lock()
 
 CACHE = {}
 CACHE_LOCK = threading.Lock()
+
+
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get('logged_in'):
+            if request.path.startswith('/api/'):
+                return jsonify({"error": "未登录或会话已过期", "redirect": url_for('login')}), 401
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated
+
+
+def permission_required(perm):
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            user = session.get('user', {})
+            if not has_permission(user, perm):
+                if request.path.startswith('/api/'):
+                    return jsonify({"error": "无权限"}), 403
+                return redirect(url_for('index'))
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
+
+
+def any_permission_required(*perms):
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            user = session.get('user', {})
+            if user.get('is_admin'):
+                return f(*args, **kwargs)
+            if not any(p in user.get('perms', []) for p in perms):
+                if request.path.startswith('/api/'):
+                    return jsonify({"error": "无权限"}), 403
+                return redirect(url_for('index'))
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
+
 
 def load_servers():
     db_servers = load_servers_from_db()
@@ -234,14 +114,20 @@ def load_servers():
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
             servers = json.load(f)
     for s in servers:
-        s.setdefault('enabled_categories', list(QUERY_SETS.keys()))
-        s.setdefault('enabled_os_checks', list(OS_CHECKS.keys()))
-        s.setdefault('in_control', True)
-        s.setdefault('apps', [])
-        s.setdefault('persist_enabled', False)
+        if 'enabled_categories' not in s:
+            s['enabled_categories'] = list(QUERY_SETS.keys())
+        if 'enabled_os_checks' not in s:
+            s['enabled_os_checks'] = list(OS_CHECKS.keys())
+        if 'in_control' not in s:
+            s['in_control'] = True
+        if 'apps' not in s:
+            s['apps'] = []
+        if 'persist_enabled' not in s:
+            s['persist_enabled'] = False
     if db_servers is not None and len(db_servers) == 0 and len(servers) > 0:
         save_servers(servers)
     return servers
+
 
 def save_servers(servers):
     os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
@@ -251,64 +137,568 @@ def save_servers(servers):
     for s in servers:
         save_server_to_db(s)
 
+
 def get_server_by_id(server_id):
-    for s in load_servers():
+    servers = load_servers()
+    for s in servers:
         if s.get('id') == server_id:
             return s
     return None
 
-_SENSITIVE_KEYS = ('ssh_pass', 'db_pass')
-
-def safe_server(s):
-    return {k: v for k, v in s.items() if k not in _SENSITIVE_KEYS}
-
-def safe_servers_list(servers):
-    return [safe_server(s) for s in servers]
 
 def template_context():
     user = session.get('user', {})
     return {
-        'username': session.get('username'),
-        'is_admin': user.get('is_admin', False),
-        'user_perms': user.get('perms', []),
+        "username": session.get('username'),
+        "is_admin": user.get('is_admin', False),
+        "user_perms": user.get('perms', []),
     }
 
-def login_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if not session.get('logged_in'):
+
+@app.route('/api/reset-password', methods=['POST'])
+def api_reset_password():
+    data = request.get_json(silent=True) or {}
+    username = data.get('username', '').strip()
+    password = data.get('password', '')
+    if not username or not password:
+        return jsonify({"ok": False, "msg": "用户名和密码不能为空"})
+    if len(password) < 4:
+        return jsonify({"ok": False, "msg": "新密码至少 4 位"})
+    if username == 'admin':
+        return jsonify({"ok": False, "msg": "admin 不支持此方式重置，请登录后修改"})
+    from auth import load_users, save_users, _hash
+    users = load_users()
+    user = next((u for u in users if u.get('username') == username), None)
+    if not user:
+        return jsonify({"ok": False, "msg": "用户不存在"})
+    if user.get('is_admin'):
+        return jsonify({"ok": False, "msg": "管理员不支持此方式重置，请登录后修改"})
+    user['password'] = _hash(password)
+    save_users(users)
+    return jsonify({"ok": True, "msg": "密码重置成功，请返回登录"})
+
+
+@app.before_request
+def refresh_session_user():
+    if session.get('logged_in') and session.get('username'):
+        if request.path == '/api/stream':
+            return
+        now = time.time()
+        last = session.get('last_activity', now)
+        if now - last > 1800:
+            session.clear()
             if request.path.startswith('/api/'):
-                return jsonify({'error': '未登录或会话已过期', 'redirect': url_for('login')}), 401
+                return jsonify({"error": "会话已过期", "redirect": url_for('login')}), 401
             return redirect(url_for('login'))
-        return f(*args, **kwargs)
-    return decorated
+        session['last_activity'] = now
+        user = session.get('user', {})
+        if not user.get('perms') or 'servers' in user.get('perms', []) or 'control' in user.get('perms', []):
+            try:
+                from auth import load_users as reload_users
+                current = next((u for u in reload_users() if u.get('username') == session.get('username')), None)
+                if current:
+                    session['user'] = current
+            except Exception:
+                pass
 
-def permission_required(perm):
-    def decorator(f):
-        @wraps(f)
-        def decorated(*args, **kwargs):
-            if not has_permission(session.get('user', {}), perm):
-                if request.path.startswith('/api/'):
-                    return jsonify({'error': '无权限'}), 403
-                return redirect(url_for('index'))
-            return f(*args, **kwargs)
-        return decorated
-    return decorator
 
-def any_permission_required(*perms):
-    def decorator(f):
-        @wraps(f)
-        def decorated(*args, **kwargs):
-            user = session.get('user', {})
-            if user.get('is_admin'):
-                return f(*args, **kwargs)
-            if not any(p in user.get('perms', []) for p in perms):
-                if request.path.startswith('/api/'):
-                    return jsonify({'error': '无权限'}), 403
-                return redirect(url_for('index'))
-            return f(*args, **kwargs)
-        return decorated
-    return decorator
+@app.errorhandler(500)
+def internal_error(e):
+    import traceback
+    tb = traceback.format_exc()
+    return f"<h2>500 内部错误</h2><pre>{tb}</pre>", 500
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form.get('username', '')
+        password = request.form.get('password', '')
+        user = check_login(username, password)
+        if user:
+            session['logged_in'] = True
+            session['username'] = username
+            session['user'] = user
+            session['last_activity'] = time.time()
+            session.permanent = True
+            return redirect(url_for('index'))
+        return render_template('login.html', error='用户名或密码错误')
+    return render_template('login.html', error=None)
+
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
+
+
+@app.route('/help')
+@login_required
+def help_page():
+    return render_template('help.html', **template_context())
+
+
+@app.route('/')
+@login_required
+@permission_required('dashboard')
+def index():
+    try:
+        servers = load_servers()
+        return render_template('index.html', servers=servers, **template_context())
+    except Exception as e:
+        return f"<pre>首页渲染错误:\n{traceback.format_exc()}</pre>", 500
+
+
+@app.route('/servers')
+@login_required
+@any_permission_required('servers_view', 'servers_edit')
+def servers_page():
+    try:
+        servers = load_servers()
+        return render_template('servers.html', servers=servers,
+                               query_sets=QUERY_SETS, os_check_labels=OS_CHECK_LABELS,
+                               **template_context())
+    except Exception as e:
+        return f"<pre>服务管理页渲染错误:\n{traceback.format_exc()}</pre>", 500
+
+
+@app.route('/servers/add')
+@login_required
+@permission_required('servers_edit')
+def servers_add():
+    try:
+        return render_template('servers_add.html',
+                               query_sets=QUERY_SETS, os_check_labels=OS_CHECK_LABELS,
+                               **template_context())
+    except Exception as e:
+        return f"<pre>添加服务器页渲染错误:\n{traceback.format_exc()}</pre>", 500
+
+
+@app.route('/server/<server_id>')
+@login_required
+@any_permission_required('servers_view', 'servers_edit')
+def server_detail(server_id):
+    server = get_server_by_id(server_id)
+    if not server:
+        return redirect(url_for('servers_page'))
+    try:
+        return render_template('detail.html', server=server,
+                               query_sets=QUERY_SETS, os_check_labels=OS_CHECK_LABELS,
+                               query_labels=QUERY_LABELS, **template_context())
+    except Exception as e:
+        return f"<pre>详情页渲染错误:\n{traceback.format_exc()}</pre>", 500
+
+
+@app.route('/control')
+@login_required
+@any_permission_required('control_view', 'control_exec')
+def control_page():
+    try:
+        servers = load_servers()
+        return render_template('control.html', servers=servers, **template_context())
+    except Exception as e:
+        return f"<pre>管控页渲染错误:\n{traceback.format_exc()}</pre>", 500
+
+
+@app.route('/profile', methods=['GET', 'POST'])
+@login_required
+def profile():
+    if request.method == 'POST':
+        username = session.get('username')
+        old_pwd = request.form.get('old_password', '')
+        new_pwd = request.form.get('new_password', '')
+        ok, msg = change_password(username, old_pwd, new_pwd)
+        return render_template('profile.html', msg=msg, ok=ok, **template_context())
+    return render_template('profile.html', msg=None, ok=None, **template_context())
+
+
+@app.route('/users')
+@login_required
+@permission_required('admin')
+def users_page():
+    try:
+        users = load_auth_users()
+        return render_template('users.html', users=users, permissions=PERMISSIONS, **template_context())
+    except Exception as e:
+        return f"<pre>用户管理页渲染错误:\n{traceback.format_exc()}</pre>", 500
+
+
+@app.route('/api/users', methods=['POST'])
+@login_required
+@permission_required('admin')
+def api_add_user():
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "无效数据"}), 400
+    ok, msg = add_user(data.get('username', ''), data.get('password', ''),
+                       data.get('is_admin', False), data.get('perms', []))
+    return jsonify({"status": "ok" if ok else "error", "msg": msg})
+
+
+@app.route('/api/users/<username>', methods=['PUT'])
+@login_required
+@permission_required('admin')
+def api_update_user(username):
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "无效数据"}), 400
+    ok, msg = update_user(username, data)
+    return jsonify({"status": "ok" if ok else "error", "msg": msg})
+
+
+@app.route('/api/users/<username>', methods=['DELETE'])
+@login_required
+@permission_required('admin')
+def api_delete_user(username):
+    ok, msg = delete_user(username)
+    return jsonify({"status": "ok" if ok else "error", "msg": msg})
+
+
+@app.route('/api/test-connection', methods=['POST'])
+@login_required
+def api_test_connection():
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "无效的请求数据"}), 400
+    try:
+        result = test_connection(data)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
+
+
+@app.route('/api/servers', methods=['GET'])
+@login_required
+def api_list_servers():
+    servers = load_servers()
+    safe_servers = [{k: v for k, v in s.items() if k not in ('ssh_pass', 'db_pass')} for s in servers]
+    return jsonify(safe_servers)
+
+
+@app.route('/api/servers', methods=['POST'])
+@login_required
+@permission_required('servers_edit')
+def api_add_server():
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "无效的请求数据"}), 400
+    servers = load_servers()
+    data['id'] = uuid.uuid4().hex[:8]
+    if 'enabled_categories' not in data:
+        data['enabled_categories'] = list(QUERY_SETS.keys())
+    if 'enabled_os_checks' not in data:
+        data['enabled_os_checks'] = list(OS_CHECKS.keys())
+    data['auto_refresh'] = data.get('auto_refresh', 0)
+    servers.append(data)
+    save_servers(servers)
+    return jsonify({"status": "ok", "id": data['id']})
+
+
+@app.route('/api/servers/<server_id>', methods=['PUT'])
+@login_required
+@permission_required('servers_edit')
+def api_update_server(server_id):
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "无效的请求数据"}), 400
+    servers = load_servers()
+    for s in servers:
+        if s.get('id') == server_id:
+            for key in ['name', 'ssh_host', 'ssh_port', 'ssh_user', 'ssh_pass',
+                        'db_host', 'db_port', 'db_user', 'db_pass', 'db_name',
+                        'isql_cmd', 'enabled_categories', 'enabled_os_checks', 'auto_refresh',
+                        'svc_name', 'svc_mgr', 'os_type', 'in_control', 'apps',
+                        'svc_start_cmd', 'svc_stop_cmd', 'persist_enabled']:
+                if key in data:
+                    s[key] = data[key]
+            save_servers(servers)
+            return jsonify({"status": "ok"})
+    return jsonify({"error": "服务不存在"}), 404
+
+
+@app.route('/api/servers/<server_id>', methods=['DELETE'])
+@login_required
+@permission_required('servers_edit')
+def api_delete_server(server_id):
+    servers = load_servers()
+    servers = [s for s in servers if s.get('id') != server_id]
+    save_servers(servers)
+    delete_server_from_db(server_id)
+    with CACHE_LOCK:
+        CACHE.pop(server_id, None)
+    return jsonify({"status": "ok"})
+
+
+@app.route('/api/servers/<server_id>/collect', methods=['POST'])
+@login_required
+def api_collect(server_id):
+    server = get_server_by_id(server_id)
+    if not server:
+        return jsonify({"error": "服务不存在"}), 404
+    try:
+        result = collect_all(server, server.get('enabled_categories'), server.get('enabled_os_checks'))
+        with CACHE_LOCK:
+            CACHE[server_id] = {"data": result, "time": time.time()}
+        _persist_errors(server, result)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
+
+
+@app.route('/api/servers/<server_id>/data', methods=['GET'])
+@login_required
+def api_get_cached(server_id):
+    with CACHE_LOCK:
+        cached = CACHE.get(server_id)
+    if cached:
+        return jsonify(cached["data"])
+    return jsonify(None)
+
+
+@app.route('/api/servers/<server_id>/collect-partial', methods=['POST'])
+@login_required
+def api_collect_partial(server_id):
+    server = get_server_by_id(server_id)
+    if not server:
+        return jsonify({"error": "服务不存在"}), 404
+    data = request.get_json(silent=True) or {}
+    categories = data.get('categories', [])
+    os_checks = data.get('os_checks', [])
+    if not categories and not os_checks:
+        return jsonify({"error": "请指定采集类别"}), 400
+    try:
+        result = collect_all(server, categories or [], os_checks or [])
+        with CACHE_LOCK:
+            existing = CACHE.get(server_id, {"data": {}, "time": 0})
+            existing_data = existing.get("data", {})
+            if "os_info" in result:
+                existing_data["os_info"] = result["os_info"]
+            if "db_queries" in result:
+                existing_data["db_queries"] = result["db_queries"]
+            existing_data["server"] = result["server"]
+            existing_data["timestamp"] = result["timestamp"]
+            CACHE[server_id] = {"data": existing_data, "time": time.time()}
+        _persist_errors(server, result)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
+
+
+@app.route('/api/servers/<server_id>/db-control', methods=['POST'])
+@login_required
+@any_permission_required('control_view', 'control_exec')
+def api_db_control(server_id):
+    server = get_server_by_id(server_id)
+    if not server:
+        return jsonify({"error": "服务不存在"}), 404
+    data = request.get_json(silent=True) or {}
+    action = data.get('action', 'status')
+    if action not in ('start', 'stop', 'restart', 'status'):
+        return jsonify({"error": "无效的操作"}), 400
+    if action != 'status':
+        user = session.get('user', {})
+        if not has_permission(user, 'control_exec'):
+            return jsonify({"error": "无执行权限"}), 403
+    try:
+        result = db_control(server, action)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+
+@app.route('/api/servers/<server_id>/app-control', methods=['POST'])
+@login_required
+@any_permission_required('control_view', 'control_exec')
+def api_app_control(server_id):
+    server = get_server_by_id(server_id)
+    if not server:
+        return jsonify({"error": "服务不存在"}), 404
+    data = request.get_json(silent=True) or {}
+    action = data.get('action', 'status')
+    app_name = data.get('app')
+    if action not in ('start', 'stop', 'restart', 'status'):
+        return jsonify({"error": "无效的操作"}), 400
+    if not app_name:
+        return jsonify({"error": "请指定应用名称"}), 400
+    if action != 'status':
+        user = session.get('user', {})
+        if not has_permission(user, 'control_exec'):
+            return jsonify({"error": "无执行权限"}), 403
+    try:
+        result = app_control(server, app_name, action)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+
+@app.route('/config')
+@login_required
+@permission_required('admin')
+def config_page():
+    return render_template('config.html', config=load_config(), **template_context())
+
+
+@app.route('/api/config', methods=['GET'])
+@login_required
+@permission_required('admin')
+def api_get_config():
+    return jsonify(load_config())
+
+
+@app.route('/api/config', methods=['PUT'])
+@login_required
+@permission_required('admin')
+def api_update_config():
+    data = request.get_json(silent=True) or {}
+    cfg = load_config()
+    if 'log_db' in data:
+        cfg['log_db'] = data['log_db']
+    if 'log_retention_days' in data:
+        cfg['log_retention_days'] = data['log_retention_days']
+    if 'collect_workers' in data:
+        cfg['collect_workers'] = int(data['collect_workers'])
+    if 'log_enabled' in data:
+        cfg['log_enabled'] = data['log_enabled']
+    if 'server_db_enabled' in data:
+        cfg['server_db_enabled'] = data['server_db_enabled']
+    save_config(cfg)
+    _reinit_executor()
+    from auth import load_users as auth_users
+    auth_users.cache_clear() if hasattr(auth_users, 'cache_clear') else None
+    import auth
+    auth._users_cache = None
+    auth.load_users()
+    return jsonify({"status": "ok"})
+
+
+@app.route('/server/<server_id>/log-history')
+@login_required
+def log_history_page(server_id):
+    server = get_server_by_id(server_id)
+    if not server:
+        return "服务不存在", 404
+    return render_template('log_history.html', server=server, **template_context())
+
+
+@app.route('/api/servers/<server_id>/log-errors', methods=['GET'])
+@login_required
+def api_log_errors(server_id):
+    server = get_server_by_id(server_id)
+    if not server:
+        return jsonify({"error": "服务不存在"}), 404
+    server_name = server.get('name') or server.get('ssh_host', '')
+    page = request.args.get('page', 1, type=int)
+    size = request.args.get('size', 50, type=int)
+    kw = request.args.get('kw', '')
+    log_type = request.args.get('type', '')
+    all_logs = query_logs(server_name, limit=5000)
+    if kw:
+        kw_lower = kw.lower()
+        all_logs = [l for l in all_logs if kw_lower in (l.get('msg','')+l.get('sql','')+l.get('user','')).lower()]
+    if log_type:
+        all_logs = [l for l in all_logs if l.get('type') == log_type]
+    total = len(all_logs)
+    start = (page - 1) * size
+    paged = all_logs[start:start + size]
+    return jsonify({"logs": paged, "total": total, "server": server_name})
+
+
+@app.route('/api/config/test-log-db', methods=['POST'])
+@login_required
+@permission_required('admin')
+def api_test_log_db():
+    data = request.get_json(silent=True) or {}
+    result = {"ssh": None, "db": None}
+    ssh_host = data.get('ssh_host', '')
+
+    if ssh_host and ssh_host not in ('127.0.0.1', 'localhost'):
+        try:
+            client = _ssh_connect({
+                'ssh_host': ssh_host,
+                'ssh_port': data.get('ssh_port', 22),
+                'ssh_user': data.get('ssh_user', 'root'),
+                'ssh_pass': data.get('ssh_pass', '')
+            })
+            client.close()
+            result['ssh'] = {"ok": True, "msg": "SSH连接成功"}
+        except Exception as e:
+            fix_map = SSH_FIX_LINUX
+            result['ssh'] = {"ok": False, "msg": translate_error(str(e), SSH_ERROR_TRANSLATE, fix_map)}
+            return jsonify(result)
+
+    try:
+        import persist
+        persist._exec_sql({
+            'host': data.get('host', '127.0.0.1'),
+            'port': data.get('port', 2003),
+            'user': data.get('user', 'SYSDBA'),
+            'pass': data.get('pass', ''),
+            'dbname': data.get('dbname', 'OSRDB'),
+            'isql': data.get('isql', 'isql'),
+            'ssh_host': data.get('ssh_host', ''),
+            'ssh_port': data.get('ssh_port', 22),
+            'ssh_user': data.get('ssh_user', 'root'),
+            'ssh_pass': data.get('ssh_pass', ''),
+        }, "select 1;")
+        result['db'] = {"ok": True, "msg": "数据库连接成功"}
+    except Exception as e:
+        result['db'] = {"ok": False, "msg": str(e)[:200]}
+
+    return jsonify(result)
+
+
+@app.route('/api/stream')
+@login_required
+def api_stream():
+    def generate():
+        last_seen = {}
+        while True:
+            servers = load_servers()
+            updates = {}
+            for s in servers:
+                sid = s.get('id')
+                with CACHE_LOCK:
+                    cached = CACHE.get(sid, {}).get('data')
+                if cached:
+                    ts = cached.get('timestamp', '')
+                    if ts != last_seen.get(sid):
+                        last_seen[sid] = ts
+                        updates[sid] = cached
+            if updates:
+                yield f"data: {json.dumps(updates, ensure_ascii=False)}\n\n"
+            time.sleep(2)
+
+    return Response(generate(), mimetype='text/event-stream', headers={
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no',
+    })
+
+
+def auto_collect_job():
+    servers = load_servers()
+    futures = []
+    for server in servers:
+        sid = server.get('id')
+        with CACHE_LOCK:
+            cached = CACHE.get(sid)
+        if cached and time.time() - cached.get("time", 0) < 30:
+            continue
+        futures.append(_get_executor().submit(_collect_one, server))
+    for f in as_completed(futures):
+        try:
+            f.result()
+        except Exception:
+            pass
+
+
+def _collect_one(server):
+    sid = server.get('id')
+    result = collect_all(server, server.get('enabled_categories'), server.get('enabled_os_checks'))
+    with CACHE_LOCK:
+        CACHE[sid] = {"data": result, "time": time.time()}
+    _persist_errors(server, result)
+    return result
+
 
 def _persist_errors(server, result):
     if not server.get('persist_enabled'):
@@ -316,20 +706,23 @@ def _persist_errors(server, result):
     t = threading.Thread(target=_do_persist, args=(server, result), daemon=True)
     t.start()
 
+
 def _do_persist(server, result):
     server_name = server.get('name') or server.get('ssh_host', '')
+
     if result.get('os_info'):
         for ck, cr in result['os_info'].items():
             text = cr.get('output', '')
             if not text:
                 continue
-            if ck == 'os_errors':
+            if ck in ('os_errors',):
                 for line in text.split('\n'):
                     line = line.strip()
                     if line and not line.startswith('==='):
                         persist_os_error(server_name, ck, line)
             elif ck == 'db_log_errors':
                 _parse_elog_content(server_name, text)
+
     perf = result.get('db_queries', {}).get('performance', {})
     slow = perf.get('slow_sql', {})
     if slow and slow.get('rows'):
@@ -340,6 +733,7 @@ def _do_persist(server, result):
                 if cost >= 0.5 and sql:
                     persist_slow_sql(server_name, {'cost': cost, 'sql': sql})
 
+
 def _parse_elog_content(server_name, text):
     import re
     blocks = text.split('===FILE:')
@@ -348,8 +742,9 @@ def _parse_elog_content(server_name, text):
             continue
         lines = block.split('\n')
         filepath = lines[0].replace('===', '').strip() if lines else ''
+        content_lines = lines[1:]
         entry = {}
-        for line in lines[1:]:
+        for line in content_lines:
             line = line.strip()
             if not line:
                 if entry and entry.get('msg'):
@@ -385,94 +780,20 @@ def _parse_elog_content(server_name, text):
             entry['tool'] = filepath.split('/')[-1][:100] if filepath else ''
             persist_db_error(server_name, entry)
 
-from routes import register_routes
-
-register_routes(app, {
-    'load_servers': load_servers, 'save_servers': save_servers,
-    'get_server_by_id': get_server_by_id, 'safe_server': safe_server,
-    'safe_servers_list': safe_servers_list, 'template_context': template_context,
-    'login_required': login_required, 'permission_required': permission_required,
-    'any_permission_required': any_permission_required,
-    'CACHE': CACHE, 'CACHE_LOCK': CACHE_LOCK,
-    '_reinit_executor': _reinit_executor, '_persist_errors': _persist_errors,
-    'collect_all': collect_all, 'test_connection': test_connection,
-    'db_control': db_control, 'app_control': app_control,
-    'QUERY_SETS': QUERY_SETS, 'QUERY_LABELS': QUERY_LABELS,
-    'OS_CHECKS': OS_CHECKS, 'OS_CHECK_LABELS': OS_CHECK_LABELS,
-    'load_config': load_config, 'save_config': save_config,
-    'query_logs': query_logs, 'delete_server_from_db': delete_server_from_db,
-    '_ssh_connect': _ssh_connect, 'translate_error': translate_error,
-    'SSH_ERROR_TRANSLATE': SSH_ERROR_TRANSLATE, 'SSH_FIX_LINUX': SSH_FIX_LINUX,
-    # new features
-    'START_TIME': START_TIME, 'audit_log': audit_log,
-    '_check_rate_limit': _check_rate_limit, '_record_login_failure': _record_login_failure,
-    '_TREND_HISTORY': _TREND_HISTORY, '_TREND_LOCK': _TREND_LOCK,
-    '_record_trend': _record_trend, 'send_alert': send_alert,
-    'AUDIT_FILE': AUDIT_FILE, 'AUDIT_MAX': AUDIT_FILE,
-})
-
-def auto_collect_job():
-    servers = load_servers()
-    futures = []
-    for server in servers:
-        sid = server.get('id')
-        with CACHE_LOCK:
-            cached = CACHE.get(sid)
-        if cached and time.time() - cached.get('time', 0) < 30:
-            continue
-        futures.append(_get_executor().submit(_collect_one, server))
-    for f in as_completed(futures):
-        try: f.result()
-        except Exception: pass
-
-def _collect_one(server):
-    sid = server.get('id')
-    result = collect_all(server, server.get('enabled_categories'), server.get('enabled_os_checks'))
-    with CACHE_LOCK:
-        CACHE[sid] = {'data': result, 'time': time.time()}
-    _persist_errors(server, result)
-    _record_trend(sid, result)
-    # alert on critical conditions (non-blocking)
-    _check_alerts(server, result)
-    return result
-
-
-def _check_alerts(server, result):
-    """Check for critical conditions and fire webhook alerts."""
-    sname = server.get('name') or server.get('ssh_host', '')
-    alerts = []
-    try:
-        dl = result.get('db_queries', {}).get('performance', {}).get('deadlock_count', {})
-        if dl and dl.get('rows') and int(dl['rows'][0][0]) > 0:
-            alerts.append(f"死锁数: {dl['rows'][0][0]}")
-    except Exception:
-        pass
-    try:
-        raw = result.get('os_info', {}).get('disk', {}).get('output', '')
-        for line in raw.split('\n'):
-            parts = line.strip().split()
-            for p in parts:
-                if p.endswith('%'):
-                    v = float(p[:-1])
-                    if v > 90:
-                        alerts.append(f"磁盘使用率: {v}%")
-                    break
-    except Exception:
-        pass
-    if alerts:
-        send_alert(sname, '告警', '; '.join(alerts))
 
 if scheduler is not None:
     scheduler.add_job(auto_collect_job, 'interval', seconds=30)
     scheduler.add_job(cleanup_old_logs, 'interval', hours=24)
+
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description='管控平台')
     parser.add_argument('--port', type=int, default=5080, help='监听端口 (默认: 5080)')
     args = parser.parse_args()
+
     if getattr(sys, 'frozen', False):
         import webbrowser
         threading.Thread(target=lambda: (time.sleep(1.5), webbrowser.open(f'http://localhost:{args.port}')), daemon=True).start()
-    _log.info('Starting oscar_monitor on port %d', args.port)
+
     app.run(host='0.0.0.0', port=args.port, debug=False)

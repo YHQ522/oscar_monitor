@@ -207,7 +207,7 @@
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 <script>
-let serverList = {{ servers_safe|tojson }};
+let serverList = {{ servers|tojson }};
 const querySets = {{ query_sets|tojson }};
 const osCheckLabels = {{ os_check_labels|tojson }};
 {% raw %}
@@ -246,10 +246,9 @@ function toggleEditAllOs() {
     toggleEditDbConfig();
 }
 
-async function openEdit(serverId) {
-    const resp = await apiFetch('/api/servers/' + serverId + '/full');
-    if (resp.error) { Swal.fire({icon:'error',title:'错误',text:resp.error,confirmButtonColor:'#dc3545'}); return; }
-    const srv = resp;
+function openEdit(serverId) {
+    const srv = serverList.find(s => s.id === serverId);
+    if (!srv) return;
     document.getElementById('editId').value = srv.id;
     document.getElementById('editName').value = srv.name || '';
     document.getElementById('editSshHost').value = srv.ssh_host || '';
@@ -331,7 +330,7 @@ async function saveEdit() {
         method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)
     });
     if (resp.status === 'ok') location.reload();
-    else Swal.fire({icon:'error',title:'保存失败',text:(resp.error||''),confirmButtonColor:'#dc3545'});
+    else alert('保存失败: ' + (resp.error || ''));
 }
 
 async function testEditConnection() {
@@ -361,7 +360,7 @@ async function testEditConnection() {
 }
 
 async function deleteServer(serverId) {
-    if (!(await swalConfirm('删除服务','确定删除该服务配置吗？','删除'))) return;
+    if (!confirm('确定删除该服务配置吗?')) return;
     await apiFetch('/api/servers/' + serverId, {method:'DELETE'});
     location.reload();
 }

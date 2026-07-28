@@ -8,7 +8,6 @@
     </h4>
     <div>
         <button class="btn btn-success btn-sm" onclick="collectAll()"><i class="bi bi-play-fill"></i> 全部采集</button>
-        <button class="btn btn-outline-info btn-sm" onclick="exportCSV()"><i class="bi bi-download"></i> 导出CSV</button>
         <button class="btn btn-outline-secondary btn-sm" onclick="toggleAutoRefresh()" id="autoRefreshBtn">
             <i class="bi bi-arrow-repeat"></i> 自动刷新: <span id="autoRefreshLabel">关</span>
         </button>
@@ -108,11 +107,6 @@
                 <p class="mt-2">请选择左侧采集选项或点击"全部采集"获取数据</p>
             </div>
         </div>
-
-        <div class="card mt-3" id="trendPanel" style="display:none;">
-            <div class="card-header py-1"><i class="bi bi-graph-up"></i> <strong>趋势图 (最近30分钟)</strong></div>
-            <div class="card-body p-1"><canvas id="trendChart" style="max-height:200px;"></canvas></div>
-        </div>
     </div>
 </div>
 {% endblock %}
@@ -145,9 +139,136 @@ function showStatus(msg, type) {
     }
 }
 
-// renderTable, renderCard, renderMetrics, renderDiskTable,
-// parseWinMem, parseLinuxMem, parseWinDisk, parseLinuxDisk,
-// parseWinCpu, parseLinuxCpu are now defined in static/js/main.js
+function renderTable(result) {
+    if (!result || result.error) {
+        return '<div class="text-danger">错误: ' + (result.error || '无数据') + '</div>';
+    }
+    if (!result.columns || result.columns.length === 0) {
+        if (result.rows && result.rows.length > 0) {
+            return '<pre class="small p-2 bg-light">' + result.rows.map(r => r.join(' | ')).join('\n') + '</pre>';
+        }
+        return '<div class="text-muted">无数据</div>';
+    }
+    let html = '<div class="table-responsive"><table class="table table-sm table-bordered table-striped mb-0">';
+    html += '<thead class="table-dark"><tr>';
+    result.columns.forEach(col => {
+        html += '<th>' + col + '</th>';
+    });
+    html += '</tr></thead><tbody>';
+    if (result.rows && result.rows.length > 0) {
+        result.rows.forEach(row => {
+            html += '<tr>';
+            for (let i = 0; i < result.columns.length; i++) {
+                html += '<td class="small">' + (row[i] !== undefined ? row[i] : '') + '</td>';
+            }
+            html += '</tr>';
+        });
+    } else {
+        html += '<tr><td colspan="' + result.columns.length + '" class="text-muted">无数据</td></tr>';
+    }
+    html += '</tbody></table></div>';
+    return html;
+}
+
+function renderCard(title, icon, content) {
+    return `<div class="card mb-2">
+        <div class="card-header py-1"><i class="bi bi-${icon}"></i> <strong>${title}</strong></div>
+        <div class="card-body p-1">${content}</div>
+    </div>`;
+}
+
+function renderMetrics(items) {
+    if (!items || items.length === 0) return '<span class="text-muted small">无数据</span>';
+    return items.map(m => `<div class="d-flex justify-content-between small mb-1"><span>${m.label}</span><strong>${m.value}</strong></div>`).join('');
+}
+
+function renderDiskTable(disks) {
+    if (!disks || disks.length === 0) return '<span class="text-muted small">无数据</span>';
+    let h = '<table class="table table-sm table-bordered mb-0"><thead class="table-secondary"><tr><th>磁盘</th><th>已用</th><th>总量</th><th>使用率</th></tr></thead><tbody>';
+    disks.forEach(d => {
+        const pctBar = d.pct !== null ? `<div class="progress" style="height:4px;"><div class="progress-bar ${d.pct > 80 ? 'bg-danger' : d.pct > 60 ? 'bg-warning' : 'bg-success'}" style="width:${d.pct}%"></div></div> ${d.pct}%` : '-';
+        h += `<tr><td>${d.mount}</td><td>${d.used}</td><td>${d.total}</td><td>${pctBar}</td></tr>`;
+    });
+    h += '</tbody></table>';
+    return h;
+}
+
+function parseWinMem(output) {
+    const m = output.match(/TotalMB=(\d+).*?FreeMB=(\d+).*?UsedMB=(\d+)/);
+    if (!m) return null;
+    const total = parseInt(m[1]), used = parseInt(m[3]), free = parseInt(m[2]);
+    return [
+        {label: '总量', value: (total/1024).toFixed(1) + ' GB'},
+        {label: '已用', value: (used/1024).toFixed(1) + ' GB'},
+        {label: '可用', value: (free/1024).toFixed(1) + ' GB'},
+        {label: '使用率', value: (used/total*100).toFixed(1) + '%'},
+    ];
+}
+
+function parseLinuxMem(output) {
+    const m = output.match(/Mem:\s+(\S+)\s+(\S+)\s+(\S+)/);
+    if (!m) return null;
+    return [
+        {label: '总量', value: m[1]},
+        {label: '已用', value: m[2]},
+        {label: '可用', value: m[3]},
+    ];
+}
+
+function parseWinDisk(output) {
+    const disks = [];
+    const lines = output.split('\n');
+    for (const line of lines) {
+        const m = line.match(/^(\w+)\s+([\d.]+)GB\/([\d.]+)GB/);
+        if (m) {
+            const used = parseFloat(m[2]), total = parseFloat(m[3]);
+            disks.push({mount: m[1] + ':', used: m[2] + ' GB', total: m[3] + ' GB', pct: total > 0 ? Math.round(used/total*100) : null});
+        }
+    }
+    if (disks.length > 0) return disks;
+    for (const line of lines) {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length >= 6 && parts[4].endsWith('%')) {
+            disks.push({mount: parts[5], used: parts[2], total: parts[1], pct: parseInt(parts[4])});
+        }
+    }
+    return disks.length > 0 ? disks : null;
+}
+
+function parseLinuxDisk(output) {
+    const disks = [];
+    const lines = output.split('\n');
+    for (const line of lines) {
+        if (line.startsWith('/') || line.match(/^[A-Z]:/)) {
+            const parts = line.trim().split(/\s+/);
+            if (parts.length >= 5) {
+                disks.push({mount: parts[5] || parts[0], used: parts[2], total: parts[1], pct: parseInt(parts[4]) || null});
+            }
+        }
+    }
+    return disks.length > 0 ? disks : null;
+}
+
+function parseWinCpu(output) {
+    const m = output.match(/LoadPercentage=(\d+)/);
+    if (m) return [{label: 'CPU使用率', value: m[1] + '%'}];
+    const procs = output.match(/---\n([\s\S]*)/);
+    if (procs) {
+        const lines = [m ? {label: 'CPU使用率', value: m[1] + '%'} : null].filter(Boolean);
+        return lines;
+    }
+    return null;
+}
+
+function parseLinuxCpu(output) {
+    const m = output.match(/load average:\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)/);
+    if (m) return [
+        {label: '1分钟', value: m[1]},
+        {label: '5分钟', value: m[2]},
+        {label: '15分钟', value: m[3]},
+    ];
+    return null;
+}
 
 function renderResults(data) {
     let html = '';
@@ -259,7 +380,6 @@ async function collectAll() {
         } else {
             document.getElementById('dataContainer').innerHTML = renderResults(data);
             showStatus('采集完成 - ' + data.timestamp, 'success');
-            loadTrends();
         }
     } catch (e) {
         showStatus(e.message, 'error');
@@ -333,46 +453,6 @@ async function appControl(serverId, appName, action) {
     } catch (e) {
         showStatus(e.message, 'error');
     }
-}
-
-// ── CSV export ─────────────────────────────────────────
-function exportCSV() {
-    window.open('/api/servers/' + SERVER_ID + '/export', '_blank');
-}
-
-// ── Trend chart ────────────────────────────────────────
-let trendChart = null;
-async function loadTrends() {
-    try {
-        const data = await apiFetch('/api/trends/' + SERVER_ID);
-        if (!data || data.length < 2) return;
-        document.getElementById('trendPanel').style.display = '';
-        const labels = data.map(p => p.ts);
-        const sessions = data.map(p => p.sessions || 0);
-        const cpu = data.map(p => p.cpu);
-        const mem = data.map(p => p.mem_pct);
-        const datasets = [{label: '连接数', data: sessions, borderColor: '#0d6efd', tension: 0.3, yAxisID: 'y'}];
-        if (cpu.some(v => v !== null && v !== undefined)) {
-            datasets.push({label: 'CPU', data: cpu, borderColor: '#dc3545', tension: 0.3, yAxisID: 'y1'});
-        }
-        if (mem.some(v => v !== null && v !== undefined)) {
-            datasets.push({label: '内存%', data: mem, borderColor: '#198754', tension: 0.3, yAxisID: 'y1'});
-        }
-        if (trendChart) trendChart.destroy();
-        const ctx = document.getElementById('trendChart').getContext('2d');
-        trendChart = new Chart(ctx, {
-            type: 'line',
-            data: {labels, datasets},
-            options: {
-                responsive: true, maintainAspectRatio: false,
-                scales: {
-                    y: {type: 'linear', position: 'left', title: {display: true, text: '连接数'}},
-                    y1: {type: 'linear', position: 'right', max: 100, title: {display: true, text: '%'}, grid: {drawOnChartArea: false}},
-                },
-                plugins: {legend: {display: true, position: 'bottom'}},
-            }
-        });
-    } catch(e) {}
 }
 {% endraw %}
 </script>
