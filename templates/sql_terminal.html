@@ -4,93 +4,174 @@
 <style>
     #sqlInput {
         font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
-        font-size: 0.9rem;
-        line-height: 1.6;
-        background: #1e1e1e;
-        color: #d4d4d4;
-        border: 1px solid #3c3c3c;
+        font-size: 0.85rem;
+        line-height: 1.7;
+        background: #1a1a2e;
+        color: #e0e0e0;
+        border: 1px solid #2d2d44;
         resize: vertical;
+        tab-size: 4;
     }
     #sqlInput:focus {
-        background: #252526;
-        color: #e0e0e0;
-        border-color: #A16207;
-        box-shadow: 0 0 0 0.2rem rgba(161,98,7,0.25);
+        background: #1e1e36;
+        color: #f0f0f0;
+        border-color: #6366F1;
+        box-shadow: 0 0 0 3px rgba(99,102,241,0.2);
     }
     #sqlResult {
-        background: #f8f9fa;
-        border-radius: 6px;
+        background: transparent;
+        border-radius: 0;
+    }
+    #sqlResult .table {
+        font-size: 0.82rem;
+        margin-bottom: 0;
+    }
+    #sqlResult .table thead th {
+        background: rgba(99,102,241,0.08);
+        color: var(--text);
+        font-weight: 600;
+        border-bottom: 2px solid rgba(99,102,241,0.15);
+        position: sticky;
+        top: 0;
+        z-index: 2;
+    }
+    [data-bs-theme="dark"] #sqlResult .table thead th {
+        background: rgba(99,102,241,0.2);
+    }
+    #sqlResult .table tbody td {
+        font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+        font-size: 0.8rem;
+        vertical-align: middle;
     }
     .sql-history-item {
         cursor: pointer;
         font-family: monospace;
-        font-size: 0.78rem;
-        padding: 4px 8px;
-        border-radius: 4px;
+        font-size: 0.75rem;
+        padding: 3px 8px;
+        border-radius: 6px;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        max-width: 220px;
+        max-width: 240px;
+        background: rgba(99,102,241,0.04);
+        border: 1px solid rgba(99,102,241,0.08);
+        transition: all 0.2s;
     }
     .sql-history-item:hover {
-        background: #e9ecef;
+        background: rgba(99,102,241,0.1);
+        border-color: rgba(99,102,241,0.25);
+    }
+    .template-btn {
+        font-size: 0.78rem;
+        border: 1px solid rgba(99,102,241,0.1);
+        background: rgba(99,102,241,0.03);
+        color: var(--text);
+        transition: all 0.2s;
+    }
+    .template-btn:hover {
+        background: rgba(99,102,241,0.1);
+        border-color: rgba(99,102,241,0.3);
+        color: var(--primary);
+    }
+    .db-type-badge {
+        font-size: 0.7rem;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-weight: 500;
+    }
+    .db-oscar    { background: rgba(99,102,241,0.12); color: #6366F1; }
+    .db-mysql    { background: rgba(6,182,212,0.12); color: #0891B2; }
+    .db-postgresql { background: rgba(5,150,105,0.12); color: #059669; }
+    .db-oracle   { background: rgba(220,38,38,0.12); color: #DC2626; }
+    .empty-state {
+        text-align: center;
+        padding: 3rem 1rem;
+        color: var(--text-muted);
+    }
+    .empty-state .icon-circle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        background: rgba(99,102,241,0.08);
+        margin-bottom: 0.75rem;
+    }
+    .exec-stats {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+    .exec-stats .stat-item {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+    .btn-export {
+        font-size: 0.72rem;
+        padding: 2px 10px;
+        border-radius: 6px;
     }
 </style>
 {% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h4><i class="bi bi-terminal"></i> <span class="shimmer-text">SQL 终端</span></h4>
-    <span class="badge bg-warning text-dark"><i class="bi bi-shield-lock"></i> 仅管理员可用</span>
+    <h4 class="mb-0"><i class="bi bi-terminal"></i> SQL 终端</h4>
+    <span class="badge" style="background:rgba(245,158,11,0.12);color:#B45309;"><i class="bi bi-shield-lock"></i> 仅管理员可用</span>
 </div>
 
 <div class="row g-3">
     <div class="col-md-9">
         <div class="card">
-            <div class="card-header py-2 d-flex align-items-center gap-2">
-                <select id="serverSelect" class="form-select form-select-sm" style="width:260px;">
+            <div class="card-header py-2 d-flex align-items-center gap-2 flex-wrap">
+                <select id="serverSelect" class="form-select form-select-sm" style="width:240px;" onchange="onServerChange()">
                     <option value="">-- 选择服务器 --</option>
                 </select>
-                <span class="text-muted small ms-auto">Ctrl+Enter 执行 · ↑↓ 历史</span>
+                <span id="dbTypeBadge" style="display:none;"></span>
+                <span class="text-muted small ms-auto" style="font-size:0.72rem;">Ctrl+Enter 执行 · ↑↓ 历史</span>
             </div>
             <div class="card-body p-2">
-                <textarea id="sqlInput" class="form-control" rows="6" placeholder="SELECT * FROM V_SYS_SESSIONS LIMIT 10;"></textarea>
-                <div class="d-flex gap-2 mt-2">
-                    <button class="btn btn-primary" onclick="execSql()"><i class="bi bi-play-fill"></i> 执行 (Ctrl+Enter)</button>
-                    <button class="btn btn-outline-secondary" onclick="clearAll()"><i class="bi bi-eraser"></i> 清空</button>
-                    <button class="btn btn-outline-info btn-sm ms-auto" onclick="toggleHistory()"><i class="bi bi-clock-history"></i> 历史</button>
+                <textarea id="sqlInput" class="form-control" rows="7" placeholder="SELECT * FROM ... LIMIT 20;"></textarea>
+                <div class="d-flex gap-2 mt-2 align-items-center">
+                    <button class="btn btn-primary btn-sm" onclick="execSql()"><i class="bi bi-play-fill"></i> 执行</button>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="clearAll()"><i class="bi bi-eraser"></i> 清空</button>
+                    <button class="btn btn-outline-info btn-sm ms-auto" onclick="toggleHistory()"><i class="bi bi-clock-history"></i> 历史 (<span id="histCount">0</span>)</button>
                 </div>
-                <div id="historyPanel" class="mt-2 p-2 bg-light rounded" style="display:none;max-height:120px;overflow-y:auto;">
-                    <div class="small fw-bold mb-1 text-muted">最近查询</div>
+                <div id="historyPanel" class="mt-2 p-2 rounded" style="display:none;max-height:130px;overflow-y:auto;background:rgba(99,102,241,0.03);">
+                    <div class="small fw-bold mb-1" style="color:var(--primary);">最近查询</div>
                     <div id="historyList" class="d-flex flex-wrap gap-1"></div>
                 </div>
             </div>
         </div>
         <div id="sqlStatus" class="mt-2" style="display:none;"></div>
         <div class="card mt-2" id="sqlResultCard" style="display:none;">
-            <div class="card-header py-1 d-flex justify-content-between align-items-center">
-                <span><i class="bi bi-table"></i> <strong>查询结果</strong></span>
-                <span id="rowCount" class="badge bg-secondary small"></span>
+            <div class="card-header py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div class="d-flex align-items-center gap-2">
+                    <span><i class="bi bi-table"></i> <strong>查询结果</strong></span>
+                    <span id="rowCount" class="badge" style="background:rgba(99,102,241,0.1);color:var(--primary);"></span>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <div id="execStats" class="exec-stats"></div>
+                    <button class="btn btn-outline-secondary btn-export btn-sm" onclick="exportCsv()" title="导出CSV"><i class="bi bi-filetype-csv"></i> CSV</button>
+                    <button class="btn btn-outline-secondary btn-export btn-sm" onclick="exportExcel()" title="导出Excel"><i class="bi bi-file-earmark-excel"></i> Excel</button>
+                </div>
             </div>
-            <div class="card-body p-2" id="sqlResult" style="max-height:60vh;overflow:auto;"></div>
+            <div class="card-body p-0" id="sqlResult" style="max-height:65vh;overflow:auto;"></div>
         </div>
     </div>
     <div class="col-md-3">
         <div class="card" style="position:sticky;top:104px;">
-            <div class="card-header py-1"><strong><i class="bi bi-lightbulb"></i> 快捷模板</strong></div>
+            <div class="card-header py-2"><strong><i class="bi bi-lightbulb"></i> 快捷模板</strong> <span id="templateDbLabel" class="small text-muted"></span></div>
             <div class="card-body p-1">
-                <div class="d-grid gap-1">
-                    <button class="btn btn-outline-secondary btn-sm text-start template-btn" data-sql="SELECT * FROM V_SYS_SESSIONS;">📊 所有会话</button>
-                    <button class="btn btn-outline-secondary btn-sm text-start template-btn" data-sql="SELECT COUNT(*) FROM V_SYS_SESSIONS;">🔢 连接数统计</button>
-                    <button class="btn btn-outline-secondary btn-sm text-start template-btn" data-sql="SELECT * FROM V$WAIT_CHAINS;">⛓ 等待链</button>
-                    <button class="btn btn-outline-secondary btn-sm text-start template-btn" data-sql="SELECT * FROM V$GLOBAL_MEMORY;">🧠 数据库内存</button>
-                    <button class="btn btn-outline-secondary btn-sm text-start template-btn" data-sql="SELECT * FROM V$TRANSACTION WHERE EXPLICIT_TRANS='t';">📝 非自动提交事务</button>
-                    <button class="btn btn-outline-secondary btn-sm text-start template-btn" data-sql="SELECT * FROM V_SYS_DATABASE_INFO;">🗄 数据库信息</button>
-                    <button class="btn btn-outline-secondary btn-sm text-start template-btn" data-sql="SELECT * FROM SYS_TABLESPACE;">💾 表空间</button>
-                    <button class="btn btn-outline-secondary btn-sm text-start template-btn" data-sql="SELECT * FROM V_SYS_TOP_COST_SQLS WHERE TIME(s) > 0.5 ORDER BY TIME(s) DESC LIMIT 20;">🐌 慢SQL TOP20</button>
+                <div class="d-grid gap-1" id="templateList">
+                    <div class="text-muted small text-center py-3">请先选择服务器</div>
                 </div>
                 <hr class="my-2">
-                <div class="small text-muted px-1">
-                    <i class="bi bi-info-circle"></i> 仅支持只读查询<br>(SELECT / SHOW / DESC)
+                <div class="small px-1" style="color:var(--text-muted);font-size:0.72rem;">
+                    <i class="bi bi-info-circle"></i> 仅支持只读查询 (SELECT / SHOW / DESC / EXPLAIN)
                 </div>
             </div>
         </div>
@@ -105,29 +186,121 @@
 const STORAGE_KEY = 'sql_terminal_history';
 let sqlHistory = [];
 let historyIndex = -1;
+let serverList = [];
+let lastResult = null;
+let queryStartTime = 0;
 
-// 初始化
+// ═══ 数据库类型配置 ═══
+const DB_TEMPLATES = {
+    oscar: [
+        { icon:'📊', label:'所有会话',    sql:'SELECT * FROM V_SYS_SESSIONS;' },
+        { icon:'🔢', label:'连接数统计',  sql:'SELECT COUNT(*) AS CNT FROM V_SYS_SESSIONS;' },
+        { icon:'⛓', label:'等待链',      sql:'SELECT * FROM V$WAIT_CHAINS;' },
+        { icon:'🧠', label:'数据库内存',  sql:'SELECT * FROM V$GLOBAL_MEMORY;' },
+        { icon:'📝', label:'非自动提交事务',sql:"SELECT * FROM V$TRANSACTION WHERE EXPLICIT_TRANS='t';" },
+        { icon:'🗄', label:'数据库信息',  sql:'SELECT * FROM V_SYS_DATABASE_INFO;' },
+        { icon:'💾', label:'表空间',      sql:'SELECT * FROM SYS_TABLESPACE;' },
+        { icon:'🐌', label:'慢SQL TOP20', sql:'SELECT "TIME(s)", SQL FROM V_SYS_TOP_COST_SQLS WHERE "TIME(s)">0.5 ORDER BY "TIME(s)" DESC LIMIT 20;' },
+    ],
+    mysql: [
+        { icon:'📊', label:'所有连接',    sql:'SELECT * FROM information_schema.PROCESSLIST;' },
+        { icon:'🔢', label:'连接数统计',  sql:'SELECT COUNT(*) AS CNT FROM information_schema.PROCESSLIST;' },
+        { icon:'🗄', label:'数据库列表',  sql:'SELECT SCHEMA_NAME, DEFAULT_CHARACTER_SET_NAME FROM information_schema.SCHEMATA;' },
+        { icon:'⛓', label:'InnoDB状态',  sql:'SHOW ENGINE INNODB STATUS\\G' },
+        { icon:'💾', label:'库大小排名',  sql:"SELECT TABLE_SCHEMA, ROUND(SUM(data_length+index_length)/1024/1024,2) AS SIZE_MB FROM information_schema.tables GROUP BY TABLE_SCHEMA ORDER BY SIZE_MB DESC;" },
+        { icon:'🧠', label:'内存状态',    sql:"SELECT VARIABLE_NAME, VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME IN ('Innodb_buffer_pool_pages_total','Threads_connected','Slow_queries');" },
+        { icon:'🐌', label:'慢查询TOP20', sql:'SELECT TIME/1000 AS TIME_S, SQL_TEXT FROM mysql.slow_log ORDER BY TIME DESC LIMIT 20;' },
+        { icon:'📋', label:'变量一览',    sql:"SHOW VARIABLES LIKE '%buffer_pool%';" },
+    ],
+    postgresql: [
+        { icon:'📊', label:'活跃连接',    sql:'SELECT pid, usename, application_name, state, query_start FROM pg_stat_activity WHERE state != \'idle\';' },
+        { icon:'🔢', label:'连接数统计',  sql:'SELECT COUNT(*) AS CNT, state FROM pg_stat_activity GROUP BY state;' },
+        { icon:'🗄', label:'数据库列表',  sql:'SELECT datname, pg_size_pretty(pg_database_size(datname)) AS size FROM pg_database;' },
+        { icon:'💾', label:'表大小TOP20', sql:"SELECT tablename, pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS total_size FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema') ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC LIMIT 20;" },
+        { icon:'🧠', label:'内存配置',    sql:"SELECT name, setting, unit FROM pg_settings WHERE name IN ('shared_buffers','work_mem','effective_cache_size','max_connections');" },
+        { icon:'🔒', label:'锁等待',      sql:'SELECT blocked.pid AS blocked_pid, blocking.pid AS blocking_pid, blocked.query AS blocked_query FROM pg_stat_activity blocked JOIN pg_locks bl ON blocked.pid=bl.pid JOIN pg_locks bk ON bl.locktype=bk.locktype AND bl.DATABASE=bk.DATABASE AND bl.relation=bk.relation AND bl.pid!=bk.pid JOIN pg_stat_activity blocking ON bk.pid=blocking.pid WHERE NOT bl.granted;' },
+        { icon:'🐌', label:'慢查询TOP20', sql:'SELECT total_exec_time/1000 AS time_s, LEFT(query,200) AS query, calls FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 20;' },
+        { icon:'📋', label:'扩展列表',    sql:'SELECT * FROM pg_extension;' },
+    ],
+    oracle: [
+        { icon:'📊', label:'所有会话',    sql:'SELECT SID, SERIAL#, USERNAME, STATUS, MACHINE FROM V$SESSION WHERE USERNAME IS NOT NULL;' },
+        { icon:'🔢', label:'连接数统计',  sql:'SELECT COUNT(*) AS CNT, USERNAME FROM V$SESSION GROUP BY USERNAME ORDER BY CNT DESC;' },
+        { icon:'🗄', label:'数据库信息',  sql:'SELECT NAME, DBID, CREATED, LOG_MODE, OPEN_MODE FROM V$DATABASE;' },
+        { icon:'💾', label:'表空间',      sql:'SELECT TABLESPACE_NAME, ROUND(SUM(BYTES)/1024/1024,2) AS SIZE_MB FROM DBA_DATA_FILES GROUP BY TABLESPACE_NAME;' },
+        { icon:'🧠', label:'SGA内存',     sql:'SELECT COMPONENT, CURRENT_SIZE/1024/1024||\' MB\' AS SIZE_MB FROM V$MEMORY_DYNAMIC_COMPONENTS WHERE CURRENT_SIZE>0;' },
+        { icon:'🔒', label:'锁等待',      sql:'SELECT * FROM V$LOCK WHERE BLOCK=1;' },
+        { icon:'🐌', label:'慢SQL TOP20', sql:'SELECT * FROM (SELECT ELAPSED_TIME/1000000 AS TIME_S, SQL_TEXT FROM V$SQL WHERE ELAPSED_TIME/1000000>0.5 ORDER BY ELAPSED_TIME DESC) WHERE ROWNUM<=20;' },
+        { icon:'📋', label:'参数一览',    sql:"SELECT NAME, VALUE FROM V$PARAMETER WHERE ISDEFAULT='FALSE' AND ROWNUM<=30;" },
+    ],
+};
+
+const DB_COLORS = {
+    oscar:      { cls:'db-oscar',     label:'Oscar' },
+    mysql:      { cls:'db-mysql',     label:'MySQL' },
+    postgresql: { cls:'db-postgresql',label:'PostgreSQL' },
+    oracle:     { cls:'db-oracle',    label:'Oracle' },
+};
+
+// ═══ 初始化 ═══
 (async function init() {
-    // 加载服务器列表
     try {
-        const servers = await apiFetch('/api/servers');
+        serverList = await apiFetch('/api/servers');
         const sel = document.getElementById('serverSelect');
-        servers.forEach(s => {
+        serverList.forEach(s => {
             const opt = document.createElement('option');
             opt.value = s.id;
+            opt.dataset.dbType = s.db_type || 'oscar';
             opt.textContent = s.name || s.ssh_host || s.id;
             sel.appendChild(opt);
         });
     } catch(e) {}
 
-    // 恢复历史
     try {
         sqlHistory = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
         renderHistory();
     } catch(e) {}
 })();
 
-// ── 执行 SQL ──
+// ═══ 服务器切换 → 动态模板 ═══
+function onServerChange() {
+    const sel = document.getElementById('serverSelect');
+    const opt = sel.options[sel.selectedIndex];
+    const dbType = (opt && opt.dataset.dbType) || 'oscar';
+    const info = DB_COLORS[dbType] || DB_COLORS.oscar;
+
+    // 更新类型标签
+    const badge = document.getElementById('dbTypeBadge');
+    badge.style.display = '';
+    badge.className = 'db-type-badge ' + info.cls;
+    badge.textContent = info.label;
+
+    // 更新模板
+    const templates = DB_TEMPLATES[dbType] || DB_TEMPLATES.oscar;
+    const list = document.getElementById('templateList');
+    list.innerHTML = templates.map(t =>
+        `<button class="btn btn-outline-secondary btn-sm text-start template-btn" data-sql="${escapeHtml(t.sql)}">${t.icon} ${t.label}</button>`
+    ).join('');
+    bindTemplateClicks();
+
+    document.getElementById('templateDbLabel').textContent = '· ' + info.label;
+
+    // 清理之前的结果
+    if (lastResult) {
+        document.getElementById('sqlResultCard').style.display = 'none';
+        lastResult = null;
+    }
+}
+
+function bindTemplateClicks() {
+    document.querySelectorAll('.template-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.getElementById('sqlInput').value = this.dataset.sql;
+            document.getElementById('sqlInput').focus();
+        });
+    });
+}
+
+// ═══ 执行 SQL ═══
 async function execSql() {
     const serverId = document.getElementById('serverSelect').value;
     const sql = document.getElementById('sqlInput').value.trim();
@@ -138,9 +311,13 @@ async function execSql() {
     const resultCard = document.getElementById('sqlResultCard');
     const resultDiv = document.getElementById('sqlResult');
 
+    queryStartTime = performance.now();
     statusEl.style.display = '';
-    statusEl.innerHTML = '<div class="alert alert-info py-1 small mb-0"><div class="spinner-border spinner-border-sm me-1"></div>执行中...</div>';
+    statusEl.innerHTML = `<div class="d-flex align-items-center gap-2 p-2 rounded" style="background:rgba(99,102,241,0.06);border:1px solid rgba(99,102,241,0.12);">
+        <div class="spinner-border spinner-border-sm" style="color:var(--primary);"></div>
+        <span class="small">执行中...</span></div>`;
     resultCard.style.display = 'none';
+    lastResult = null;
 
     try {
         const data = await apiFetch('/api/servers/' + serverId + '/sql-query', {
@@ -149,24 +326,34 @@ async function execSql() {
             body: JSON.stringify({sql: sql})
         });
 
+        const elapsed = ((performance.now() - queryStartTime) / 1000).toFixed(2);
+
         if (data.error) {
-            statusEl.innerHTML = '<div class="alert alert-danger py-1 small mb-0">❌ ' + escapeHtml(data.error) + '</div>';
+            statusEl.innerHTML = `<div class="d-flex align-items-center gap-2 p-2 rounded" style="background:rgba(220,38,38,0.06);border:1px solid rgba(220,38,38,0.15);">
+                <i class="bi bi-x-circle" style="color:#DC2626;"></i>
+                <span class="small" style="color:#DC2626;">${escapeHtml(data.error)}</span></div>`;
         } else {
             statusEl.style.display = 'none';
             resultCard.style.display = '';
             resultDiv.innerHTML = renderTable(data);
+            lastResult = data;
             const rowCount = (data.rows && data.rows.length) || 0;
             document.getElementById('rowCount').textContent = rowCount + ' 行';
-
-            // 保存历史
+            document.getElementById('execStats').innerHTML =
+                `<span class="stat-item"><i class="bi bi-stopwatch"></i> ${elapsed}s</span>` +
+                `<span class="stat-item"><i class="bi bi-check-circle" style="color:#059669;"></i> 完成</span>`;
             addHistory(sql);
         }
     } catch (e) {
-        statusEl.innerHTML = '<div class="alert alert-danger py-1 small mb-0">' + escapeHtml(e.message) + '</div>';
+        const elapsed = ((performance.now() - queryStartTime) / 1000).toFixed(1);
+        statusEl.innerHTML = `<div class="d-flex align-items-center gap-2 p-2 rounded" style="background:rgba(220,38,38,0.06);border:1px solid rgba(220,38,38,0.15);">
+            <i class="bi bi-exclamation-triangle" style="color:#DC2626;"></i>
+            <span class="small" style="color:#DC2626;">${escapeHtml(e.message)}</span>
+            <span class="small text-muted ms-auto">${elapsed}s</span></div>`;
     }
 }
 
-// ── 历史记录 ──
+// ═══ 历史记录 ═══
 function addHistory(sql) {
     sqlHistory = sqlHistory.filter(h => h !== sql);
     sqlHistory.unshift(sql);
@@ -178,9 +365,15 @@ function addHistory(sql) {
 
 function renderHistory() {
     const list = document.getElementById('historyList');
+    const cnt = document.getElementById('histCount');
+    if (cnt) cnt.textContent = sqlHistory.length;
     if (!list) return;
+    if (sqlHistory.length === 0) {
+        list.innerHTML = '<span class="text-muted small">暂无历史记录</span>';
+        return;
+    }
     list.innerHTML = sqlHistory.map((h, i) =>
-        `<span class="sql-history-item bg-white border" onclick="loadHistory(${i})" title="${escapeHtml(h)}">${escapeHtml(h.substring(0, 60))}${h.length > 60 ? '…' : ''}</span>`
+        `<span class="sql-history-item" onclick="loadHistory(${i})" title="${escapeHtml(h)}">${escapeHtml(h.substring(0, 65))}${h.length > 65 ? '…' : ''}</span>`
     ).join('');
 }
 
@@ -201,39 +394,87 @@ function clearAll() {
     document.getElementById('sqlInput').value = '';
     document.getElementById('sqlResultCard').style.display = 'none';
     document.getElementById('sqlStatus').style.display = 'none';
+    lastResult = null;
     document.getElementById('sqlInput').focus();
 }
 
-// ── 快捷模板 ──
-document.querySelectorAll('.template-btn').forEach(btn => {
-    btn.addEventListener('click', function() {
-        document.getElementById('sqlInput').value = this.dataset.sql;
-        document.getElementById('sqlInput').focus();
+// ═══ 导出 CSV ═══
+function exportCsv() {
+    if (!lastResult || !lastResult.columns) return;
+    const cols = lastResult.columns;
+    const rows = lastResult.rows || [];
+    let csv = '\uFEFF' + cols.join(',') + '\n';
+    rows.forEach(row => {
+        csv += cols.map((_, i) => {
+            let v = String(row[i] ?? '');
+            if (v.includes(',') || v.includes('"') || v.includes('\n')) {
+                v = '"' + v.replace(/"/g, '""') + '"';
+            }
+            return v;
+        }).join(',') + '\n';
     });
-});
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    downloadBlob(blob, 'query_result.csv');
+}
 
-// ── 快捷键 ──
+// ═══ 导出 Excel ═══
+async function exportExcel() {
+    if (!lastResult || !lastResult.columns) return;
+    try {
+        const serverId = document.getElementById('serverSelect').value;
+        const sql = document.getElementById('sqlInput').value.trim();
+        const resp = await apiFetch('/api/export/sql-result', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                server_id: serverId,
+                sql: sql,
+                columns: lastResult.columns,
+                rows: lastResult.rows
+            })
+        });
+        if (resp.status === 'ok' && resp.filename) {
+            window.open('/api/export/download/' + encodeURIComponent(resp.filename), '_blank');
+            swalSuccess('Excel 已生成');
+        } else {
+            swalError(resp.error || '导出失败');
+        }
+    } catch(e) {
+        // Fallback: 客户端生成 CSV 并提示
+        swalInfo('Excel API 不可用，已改用 CSV 下载', '提示');
+        exportCsv();
+    }
+}
+
+function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+// ═══ 快捷键 ═══
 document.addEventListener('keydown', function(e) {
     const input = document.getElementById('sqlInput');
     if (document.activeElement !== input) return;
 
-    // Ctrl+Enter: 执行
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
         execSql();
         return;
     }
-    // Arrow Up: 上一条历史
     if (e.key === 'ArrowUp' && !e.shiftKey && !e.ctrlKey && sqlHistory.length > 0) {
         const pos = input.selectionStart;
-        // Only navigate history if cursor is at start or end
         if (pos === 0 || pos === input.value.length) {
             e.preventDefault();
             historyIndex = Math.min(historyIndex + 1, sqlHistory.length - 1);
             input.value = sqlHistory[historyIndex] || '';
         }
     }
-    // Arrow Down: 下一条历史
     if (e.key === 'ArrowDown' && !e.shiftKey && !e.ctrlKey && historyIndex >= 0) {
         const pos = input.selectionStart;
         if (pos === 0 || pos === input.value.length) {
@@ -244,33 +485,35 @@ document.addEventListener('keydown', function(e) {
     }
 });
 
-// ── 复用 detail.html 的渲染函数 ──
+// ═══ 渲染表格 ═══
 function renderTable(result) {
     if (!result || result.error) {
-        return '<div class="alert alert-danger py-1 small mb-0">❌ ' + escapeHtml(result.error || '无数据') + '</div>';
+        return `<div class="empty-state"><div class="icon-circle"><i class="bi bi-exclamation-triangle fs-4" style="color:#DC2626;"></i></div><div class="small">${escapeHtml(result?.error || '无数据')}</div></div>`;
     }
     if (!result.columns || result.columns.length === 0) {
         if (result.rows && result.rows.length > 0) {
-            return '<pre class="small p-2 bg-light rounded mb-0">' + escapeHtml(result.rows.map(r => r.join(' | ')).join('\n')) + '</pre>';
+            return `<pre class="small p-3 mb-0 rounded" style="background:rgba(30,27,75,0.03);">${escapeHtml(result.rows.map(r => r.join(' | ')).join('\n'))}</pre>`;
         }
-        return '<div class="text-muted small py-2 text-center">查询成功，无返回数据</div>';
+        return `<div class="empty-state"><div class="icon-circle"><i class="bi bi-inbox fs-4" style="color:var(--primary);"></i></div><div class="small">查询成功，无返回数据</div></div>`;
     }
-    let html = '<div class="table-responsive"><table class="table table-sm table-hover mb-0" style="font-size:0.85rem;">';
-    html += '<thead class="table-dark"><tr>';
+    let html = '<div class="table-responsive"><table class="table table-sm table-hover mb-0">';
+    html += '<thead><tr>';
     result.columns.forEach(col => {
-        html += '<th class="small text-nowrap">' + escapeHtml(col) + '</th>';
+        html += '<th class="text-nowrap small">' + escapeHtml(col) + '</th>';
     });
     html += '</tr></thead><tbody>';
     if (result.rows && result.rows.length > 0) {
         result.rows.forEach(row => {
             html += '<tr>';
             for (let i = 0; i < result.columns.length; i++) {
-                html += '<td class="small"><code>' + escapeHtml(String(row[i] ?? '')) + '</code></td>';
+                const val = row[i];
+                const display = val === null || val === undefined ? '<span style="color:#94A3B8;font-style:italic;">NULL</span>' : escapeHtml(String(val));
+                html += '<td class="small">' + display + '</td>';
             }
             html += '</tr>';
         });
     } else {
-        html += '<tr><td colspan="' + result.columns.length + '" class="text-muted text-center small py-3">无数据</td></tr>';
+        html += '<tr><td colspan="' + result.columns.length + '" class="text-center text-muted small py-4">无数据</td></tr>';
     }
     html += '</tbody></table></div>';
     return html;

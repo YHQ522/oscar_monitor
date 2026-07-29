@@ -2,7 +2,7 @@ import json
 import uuid
 import subprocess
 import threading
-from persist import load_config as load_global_config, _exec_sql, _get_table_columns, _temp_sql, _build_sql
+from persist import load_config as load_global_config, _exec_sql, _get_table_columns, _temp_sql, _build_sql, _get_adapter
 from collector import _ssh_connect, _ssh_exec
 
 _lock = threading.Lock()
@@ -35,33 +35,34 @@ def _ensure_servers_table():
     if not _db_enabled():
         return False
     db = _cfg()
+    a = _get_adapter(db)
     try:
         _exec_sql(db, f"""
 create table if not exists {SERVERS_TABLE} (
     id           varchar(20) primary key,
     name         varchar(200),
     ssh_host     varchar(200),
-    ssh_port     int default 22,
+    ssh_port     {a['ddl_int']} default 22,
     ssh_user     varchar(100),
     ssh_pass     varchar(200),
     db_host      varchar(200),
-    db_port      int default 2003,
+    db_port      {a['ddl_int']} default 2003,
     db_user      varchar(100),
     db_pass      varchar(200),
     db_name      varchar(100),
     isql_cmd     varchar(200) default 'isql',
-    auto_refresh int default 0,
+    auto_refresh {a['ddl_int']} default 0,
     os_type      varchar(20) default 'linux',
-    in_control   boolean default true,
-    persist_enabled boolean default false,
+    in_control   {a['ddl_boolean']} default true,
+    persist_enabled {a['ddl_boolean']} default false,
     svc_name     varchar(100),
     svc_mgr      varchar(50) default 'systemctl',
-    svc_start_cmd text,
-    svc_stop_cmd text,
-    enabled_categories text,
-    enabled_os_checks  text,
-    apps         text,
-    created_at   timestamp default now()
+    svc_start_cmd {a['ddl_text']},
+    svc_stop_cmd {a['ddl_text']},
+    enabled_categories {a['ddl_text']},
+    enabled_os_checks  {a['ddl_text']},
+    apps         {a['ddl_text']},
+    created_at   {a['ddl_timestamp']} default {a['sql_now']}
 );
 """.strip())
         return True
@@ -73,14 +74,15 @@ def _ensure_users_table():
     if not _db_enabled():
         return False
     db = _cfg()
+    a = _get_adapter(db)
     try:
         _exec_sql(db, f"""
 create table if not exists {USERS_TABLE} (
     username    varchar(100) primary key,
     password    varchar(200),
-    is_admin    boolean default false,
-    perms       text,
-    created_at  timestamp default now()
+    is_admin    {a['ddl_boolean']} default false,
+    perms       {a['ddl_text']},
+    created_at  {a['ddl_timestamp']} default {a['sql_now']}
 );
 """.strip())
         return True

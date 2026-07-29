@@ -1,9 +1,21 @@
 {% extends "base.html" %}
 {% block title %}服务启停管控 - 管控平台{% endblock %}
+{% block head %}
+<style>
+.status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+.status-dot.running { background: #22C55E; animation: pulse-dot 2s infinite; }
+.status-dot.stopped { background: #EF4444; }
+.status-dot.unknown { background: #94A3B8; }
+@keyframes pulse-dot { 0%,100% { box-shadow: 0 0 0 0 rgba(34,197,94,0.4); } 50% { box-shadow: 0 0 0 6px rgba(34,197,94,0); } }
+</style>
+{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h4 class="mb-0"><i class="bi bi-power"></i> 服务启停管控 <span class="badge bg-accent small" style="font-size:0.6rem;background:#A16207;">状态自动刷新</span></h4>
-    <input type="text" class="form-control form-control-sm search-box" id="searchBox" placeholder="搜索..." oninput="filterControlTable()">
+    <h4 class="mb-0"><i class="bi bi-power"></i> 服务启停管控 <span class="badge bg-accent small" style="font-size:0.6rem;background:#6366F1;">状态自动刷新</span></h4>
+    <div class="d-flex align-items-center gap-2">
+        <button class="btn btn-outline-info btn-sm" onclick="queryAllStatus()"><i class="bi bi-arrow-repeat"></i> 全部查询</button>
+        <input type="text" class="form-control form-control-sm search-box" id="searchBox" placeholder="搜索..." oninput="filterControlTable()" style="width:160px;">
+    </div>
 </div>
 <p class="text-muted small mb-3">对已加入的服务执行启动、停止、状态查询操作</p>
 
@@ -27,10 +39,10 @@
 <table class="table table-sm table-hover">
     <thead class="table-light">
         <tr>
-            <th style="width:25%;">服务器</th>
+            <th style="width:22%;">服务器</th>
             <th style="width:25%;">服务配置</th>
-            <th style="width:20%;">服务状态</th>
-            <th style="width:30%;">操作</th>
+            <th style="width:18%;">服务状态</th>
+            <th style="width:35%;">操作</th>
         </tr>
     </thead>
     <tbody>
@@ -39,7 +51,7 @@
         {% for s in servers %}
         {% if s.in_control %}
         <tr id="row-{{ s.id }}">
-            <td><strong>{{ s.name or s.ssh_host }}</strong><br><span class="small text-muted">{{ s.ssh_user }}@{{ s.ssh_host }}</span></td>
+            <td><strong>{% if s.os_type == 'windows' %}🪟{% else %}🐧{% endif %} {{ s.name or s.ssh_host }}</strong><br><span class="small text-muted">{{ s.ssh_user }}@{{ s.ssh_host }}</span></td>
                 <td>
                     <span class="small">{{ s.svc_name or 'oscardb' }}</span>
                     {% if s.os_type != 'windows' %}<span class="badge bg-light text-dark small">{{ s.svc_mgr or 'systemctl' }}</span>{% endif %}
@@ -48,6 +60,7 @@
                     {% endif %}
                 </td>
             <td>
+                <span id="status-dot-{{ s.id }}" class="status-dot unknown"></span>
                 <span class="badge bg-secondary" id="status-badge-{{ s.id }}">未知</span>
                 <span class="small text-muted ms-1" id="status-msg-{{ s.id }}"></span>
             </td>
@@ -64,10 +77,10 @@
         {% endfor %}
         {% endif %}
         {% if has_apps.value %}
-        <tr class="table-active"><td colspan="4"><strong><i class="bi bi-boxes"></i> 其他应用</strong></td></tr>
-        {% for s in servers %}
-        {% for app in s.apps or [] %}
-        {% if app.in_control %}
+        {% for group_name, group_apps in app_groups.items() %}
+        <tr class="table-active"><td colspan="4"><strong><i class="bi bi-diagram-3"></i> {{ group_name }}</strong></td></tr>
+        {% for item in group_apps %}
+        {% set s = item.server %}{% set app = item.app %}
         <tr>
             <td><strong>{{ app.name }}</strong><br><span class="small text-muted">{{ s.name or s.ssh_host }} | 端口: {{ app.port }}</span></td>
             <td>
@@ -78,6 +91,7 @@
                 {% endif %}
             </td>
             <td>
+                <span id="app-status-dot-{{ s.id }}-{{ app.name }}" class="status-dot unknown"></span>
                 <span class="badge bg-secondary" id="app-status-badge-{{ s.id }}-{{ app.name }}">未知</span>
                 <span class="small text-muted ms-1" id="app-status-msg-{{ s.id }}-{{ app.name }}"></span>
             </td>
@@ -90,7 +104,6 @@
                     {% endif %}
                 </td>
         </tr>
-        {% endif %}
         {% endfor %}
         {% endfor %}
         {% endif %}
@@ -104,80 +117,62 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title"><i class="bi bi-gear"></i> 服务配置 - <span id="svcModalServerName"></span></h5>
+                <h5 class="modal-title"><i class="bi bi-gear"></i> 服务配置 - <span id="svcModalTitle"></span></h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
                 <input type="hidden" id="svcModalServerId">
+                <input type="hidden" id="svcModalAppName">
                 <div class="mb-3">
                     <label class="form-label small">服务名</label>
-                    <input class="form-control form-control-sm" id="svcModalName" placeholder="oscardb">
+                    <input class="form-control form-control-sm" id="svcModalName" placeholder="服务名">
                 </div>
                 <div class="mb-3" id="svcMgrGroup">
                     <label class="form-label small">服务管理器</label>
                     <select class="form-select form-select-sm" id="svcModalMgr" onchange="onSvcMgrChange()">
-                        <option value="systemctl">systemctl</option>
-                        <option value="service">service</option>
-                        <option value="/etc/init.d/">/etc/init.d/</option>
-                        <option value="script">脚本</option>
                     </select>
                 </div>
+                <div id="svcAppOnlyFields">
+                <div class="mb-3">
+                    <label class="form-label small">应用分组</label>
+                    <select class="form-select form-select-sm" id="svcModalGroup">
+                        <option value="">其他应用</option>
+                        <option value="Web服务">Web服务</option>
+                        <option value="数据库服务">数据库服务</option>
+                        <option value="缓存服务">缓存服务</option>
+                        <option value="消息服务">消息服务</option>
+                        <option value="数据服务">数据服务</option>
+                        <option value="容器服务">容器服务</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small">健康检查URL <span class="text-muted">(可选)</span></label>
+                    <input class="form-control form-control-sm" id="svcModalHealthUrl" placeholder="http://localhost:8080/health">
+                </div>
+                </div>
                 <div id="svcScriptGroup" style="display:none;">
-                    <div class="mb-2">
-                        <label class="form-label small">启动脚本完整命令</label>
-                        <input class="form-control form-control-sm" id="svcModalStartCmd" placeholder="例如: /opt/oscar/bin/start.sh">
-                    </div>
-                    <div class="mb-2">
-                        <label class="form-label small">停止脚本完整命令</label>
-                        <input class="form-control form-control-sm" id="svcModalStopCmd" placeholder="例如: /opt/oscar/bin/stop.sh">
+                    <div class="mb-2"><label class="form-label small">启动脚本完整命令</label><input class="form-control form-control-sm" id="svcModalStartCmd"></div>
+                    <div class="mb-2"><label class="form-label small">停止脚本完整命令</label><input class="form-control form-control-sm" id="svcModalStopCmd"></div>
+                </div>
+                <div class="accordion mt-2" id="svcAdvancedAccordion">
+                    <div class="accordion-item">
+                        <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#svcSecSsh">🔐 独立SSH (可选)</button></h2>
+                        <div id="svcSecSsh" class="accordion-collapse collapse" data-bs-parent="#svcAdvancedAccordion">
+                            <div class="accordion-body">
+                                <div class="row g-2">
+                                    <div class="col-md-6"><label class="form-label small">主机</label><input class="form-control form-control-sm" id="svcModalSshHost"></div>
+                                    <div class="col-md-2"><label class="form-label small">端口</label><input class="form-control form-control-sm" id="svcModalSshPort" value="22"></div>
+                                    <div class="col-md-4"><label class="form-label small">用户</label><input class="form-control form-control-sm" id="svcModalSshUser"></div>
+                                    <div class="col-md-6"><label class="form-label small">密码</label><input class="form-control form-control-sm" id="svcModalSshPass" type="password"></div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
                 <button type="button" class="btn btn-primary btn-sm" onclick="saveSvcModal()">保存</button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div class="modal fade" id="appSvcModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title"><i class="bi bi-gear"></i> 应用配置 - <span id="appSvcModalTitle"></span></h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <input type="hidden" id="appSvcModalServerId">
-                <input type="hidden" id="appSvcModalAppName">
-                <div class="mb-3">
-                    <label class="form-label small">服务名</label>
-                    <input class="form-control form-control-sm" id="appSvcModalName" placeholder="appname">
-                </div>
-                <div class="mb-3">
-                    <label class="form-label small">服务管理器</label>
-                    <select class="form-select form-select-sm" id="appSvcModalMgr" onchange="onAppSvcMgrChange()">
-                        <option value="systemctl">systemctl</option>
-                        <option value="service">service</option>
-                        <option value="/etc/init.d/">/etc/init.d/</option>
-                        <option value="script">脚本</option>
-                    </select>
-                </div>
-                <div id="appSvcScriptGroup" style="display:none;">
-                    <div class="mb-2">
-                        <label class="form-label small">启动脚本完整命令</label>
-                        <input class="form-control form-control-sm" id="appSvcModalStartCmd" placeholder="例如: /opt/myapp/bin/start.sh">
-                    </div>
-                    <div class="mb-2">
-                        <label class="form-label small">停止脚本完整命令</label>
-                        <input class="form-control form-control-sm" id="appSvcModalStopCmd" placeholder="例如: /opt/myapp/bin/stop.sh">
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
-                <button type="button" class="btn btn-primary btn-sm" onclick="saveAppSvcModal()">保存</button>
             </div>
         </div>
     </div>
@@ -218,16 +213,60 @@ function filterControlTable() {
     });
 }
 
+// ── OS 服务管理器选项 ──
+function setSvcMgrOptions(isWin) {
+    var sel = document.getElementById('svcModalMgr');
+    sel.innerHTML = isWin
+        ? '<option value="sc">sc (服务控制)</option><option value="script">脚本</option>'
+        : '<option value="systemctl">systemctl</option><option value="service">service</option><option value="script">脚本</option>';
+}
+
+// ── 统一编辑弹窗 ──
 function openSvcModal(serverId) {
     const srv = serverList.find(s => s.id === serverId);
     if (!srv) return;
+    var isWin = srv.os_type === 'windows';
     document.getElementById('svcModalServerId').value = serverId;
-    document.getElementById('svcModalServerName').textContent = srv.name || srv.ssh_host;
+    document.getElementById('svcModalAppName').value = '';
+    document.getElementById('svcModalTitle').textContent = srv.name || srv.ssh_host;
     document.getElementById('svcModalName').value = srv.svc_name || 'oscardb';
-    document.getElementById('svcModalMgr').value = srv.svc_mgr || 'systemctl';
+    document.getElementById('svcAppOnlyFields').style.display = 'none';
+    document.getElementById('svcModalSshHost').value = '';
+    document.getElementById('svcModalSshPort').value = '22';
+    document.getElementById('svcModalSshUser').value = '';
+    document.getElementById('svcModalSshPass').value = '';
+    setSvcMgrOptions(isWin);
+    document.getElementById('svcModalMgr').value = srv.svc_mgr || (isWin ? 'sc' : 'systemctl');
     document.getElementById('svcModalStartCmd').value = srv.svc_start_cmd || '';
     document.getElementById('svcModalStopCmd').value = srv.svc_stop_cmd || '';
-    document.getElementById('svcMgrGroup').style.display = (srv.os_type === 'windows') ? 'none' : '';
+    document.getElementById('svcMgrGroup').style.display = '';
+    onSvcMgrChange();
+    if (!svcModal) svcModal = new bootstrap.Modal(document.getElementById('svcModal'));
+    svcModal.show();
+}
+
+function openAppSvcModal(serverId, appName) {
+    const srv = serverList.find(s => s.id === serverId);
+    if (!srv) return;
+    const app = (srv.apps || []).find(a => a.name === appName);
+    if (!app) return;
+    var isWin = srv.os_type === 'windows';
+    document.getElementById('svcModalServerId').value = serverId;
+    document.getElementById('svcModalAppName').value = appName;
+    document.getElementById('svcModalTitle').textContent = appName + ' (应用)';
+    document.getElementById('svcModalName').value = app.svc_name || appName;
+    document.getElementById('svcAppOnlyFields').style.display = '';
+    document.getElementById('svcModalGroup').value = app.group || '';
+    document.getElementById('svcModalHealthUrl').value = app.health_url || '';
+    document.getElementById('svcModalSshHost').value = app.ssh_host || '';
+    document.getElementById('svcModalSshPort').value = app.ssh_port || '22';
+    document.getElementById('svcModalSshUser').value = app.ssh_user || '';
+    document.getElementById('svcModalSshPass').value = app.ssh_pass || '';
+    setSvcMgrOptions(isWin);
+    document.getElementById('svcModalMgr').value = app.svc_mgr || 'script';
+    document.getElementById('svcModalStartCmd').value = app.start_cmd || '';
+    document.getElementById('svcModalStopCmd').value = app.stop_cmd || '';
+    document.getElementById('svcMgrGroup').style.display = '';
     onSvcMgrChange();
     if (!svcModal) svcModal = new bootstrap.Modal(document.getElementById('svcModal'));
     svcModal.show();
@@ -240,40 +279,57 @@ function onSvcMgrChange() {
 
 async function saveSvcModal() {
     const serverId = document.getElementById('svcModalServerId').value;
-    const srv = serverList.find(s => s.id === serverId);
-    const name = document.getElementById('svcModalName').value || 'oscardb';
+    const appName = document.getElementById('svcModalAppName').value;
+    const name = document.getElementById('svcModalName').value;
     const mgr = document.getElementById('svcModalMgr').value || 'systemctl';
-    const body = {svc_name: name, svc_mgr: mgr};
-    if (mgr === 'script') {
-        body.svc_start_cmd = document.getElementById('svcModalStartCmd').value.trim();
-        body.svc_stop_cmd = document.getElementById('svcModalStopCmd').value.trim();
+    const group = document.getElementById('svcModalGroup').value;
+    const healthUrl = document.getElementById('svcModalHealthUrl').value.trim();
+    const sshHost = document.getElementById('svcModalSshHost').value.trim();
+    const body = {};
+    if (appName) {
+        body.apps = (serverList.find(s => s.id === serverId)?.apps || []).map(a => {
+            if (a.name === appName) return {...a, svc_name: name, svc_mgr: mgr, group: group, health_url: healthUrl,
+                start_cmd: mgr==='script' ? document.getElementById('svcModalStartCmd').value.trim() : undefined,
+                stop_cmd: mgr==='script' ? document.getElementById('svcModalStopCmd').value.trim() : undefined,
+                ssh_host: sshHost || undefined, ssh_port: parseInt(document.getElementById('svcModalSshPort').value) || undefined,
+                ssh_user: document.getElementById('svcModalSshUser').value || undefined,
+                ssh_pass: document.getElementById('svcModalSshPass').value || undefined};
+            return a;
+        });
+    } else {
+        body.svc_name = name; body.svc_mgr = mgr;
+        if (mgr === 'script') {
+            body.svc_start_cmd = document.getElementById('svcModalStartCmd').value.trim();
+            body.svc_stop_cmd = document.getElementById('svcModalStopCmd').value.trim();
+        }
     }
     try {
         const resp = await apiFetch('/api/servers/' + serverId, {
-            method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(body)
+            method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
         });
         if (resp.status === 'ok') {
             svcModal.hide();
-            const cell = document.querySelector('tr[id="row-' + serverId + '"] td:nth-child(2)');
-            if (cell) {
-                const displayMgr = mgr === 'script' ? '脚本' : mgr;
-                const isWin = (srv && srv.os_type === 'windows');
-                cell.innerHTML = '<span class="small">' + name + '</span> ' + (isWin ? '' : '<span class="badge bg-light text-dark small">' + displayMgr + '</span> ') + '<button class="btn btn-link btn-sm p-0 ms-1" onclick="openSvcModal(\'' + serverId + '\')" title="编辑服务配置"><i class="bi bi-pencil-square small"></i></button>';
-            }
+            location.reload();
         } else {
             swalError(resp.error || '未知错误');
         }
-    } catch (e) {
-        swalError(e.message);
-    }
+    } catch (e) { swalError(e.message); }
 }
 
+// ── 状态指示器 ──
+function setStatusDot(dotId, badge, status) {
+    const dot = document.getElementById(dotId);
+    if (dot) { dot.className = 'status-dot ' + status; }
+    if (!badge) return;
+    if (status === 'running') { badge.textContent = '运行中'; badge.className = 'badge bg-success'; }
+    else if (status === 'stopped') { badge.textContent = '已停止'; badge.className = 'badge bg-danger'; }
+    else { badge.textContent = '未知'; badge.className = 'badge bg-secondary'; }
+}
+
+// ── 数据库控制 ──
 async function controlAction(serverId, action, silent) {
     const badge = document.getElementById('status-badge-' + serverId);
     const msg = document.getElementById('status-msg-' + serverId);
-    if (!badge && !msg) return;
     const srv = serverList.find(s => s.id === serverId);
     const srvName = srv ? (srv.name || srv.ssh_host) : serverId;
     if (!silent) {
@@ -282,62 +338,40 @@ async function controlAction(serverId, action, silent) {
             const cfm = await swalConfirm(`确定${labels[action]}服务 ${srvName} 吗？`, '确认' + labels[action]);
             if (!cfm.isConfirmed) return;
         }
-        const labels = {start:'启动中...', stop:'停止中...', restart:'重启中...', status:'查询中...'};
-        if (badge) {
-            badge.textContent = labels[action] || action;
-            badge.className = 'badge bg-warning';
-        }
+        if (badge) { badge.textContent = action === 'status' ? '查询中...' : '执行中...'; badge.className = 'badge bg-warning'; }
     }
-
     try {
         const result = await apiFetch('/api/servers/' + serverId + '/db-control', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({action: action})
+            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action: action})
         });
-
         if (action === 'status') {
-            if (result.running) {
-                if (badge) { badge.textContent = '运行中'; badge.className = 'badge bg-success'; }
-            } else {
-                if (badge) { badge.textContent = '已停止'; badge.className = 'badge bg-danger'; }
-            }
+            setStatusDot('status-dot-' + serverId, badge, result.running ? 'running' : 'stopped');
             if (msg) msg.textContent = result.msg || '';
             return;
         }
-
         if (result.ok) {
-            if (badge) {
-                badge.textContent = action === 'start' ? '已启动' : action === 'stop' ? '已停止' : '已重启';
-                badge.className = 'badge bg-success';
-            }
+            setStatusDot('status-dot-' + serverId, badge, action === 'stop' ? 'stopped' : 'running');
             if (msg) msg.textContent = result.msg || '';
-            const log = `操作: ${action}\n服务: ${srvName}\n结果: 成功\n\n${result.output || result.msg || ''}`;
-            document.getElementById('resultContent').textContent = log;
-            document.getElementById('resultTitle').innerHTML = '<i class="bi bi-check-circle text-success"></i> ' + (action === 'start' ? '启动' : action === 'stop' ? '停止' : '重启') + '成功';
+            document.getElementById('resultContent').textContent = `操作: ${action}\n服务: ${srvName}\n结果: 成功\n\n${result.output || result.msg || ''}`;
+            document.getElementById('resultTitle').innerHTML = '<i class="bi bi-check-circle text-success"></i> ' + (action==='start'?'启动':action==='stop'?'停止':'重启') + '成功';
             new bootstrap.Modal(document.getElementById('resultModal')).show();
             setTimeout(() => controlAction(serverId, 'status', true), action === 'restart' ? 3000 : 2000);
         } else {
-            if (badge) { badge.textContent = '失败'; badge.className = 'badge bg-danger'; }
+            setStatusDot('status-dot-' + serverId, badge, 'stopped');
             if (msg) msg.textContent = result.msg || '';
-            const log = `操作: ${action}\n服务: ${srvName}\n结果: 失败\n错误: ${result.msg || ''}\n\n${result.output || ''}`;
-            document.getElementById('resultContent').textContent = log;
+            document.getElementById('resultContent').textContent = `操作: ${action}\n服务: ${srvName}\n结果: 失败\n错误: ${result.msg || ''}\n\n${result.output || ''}`;
             document.getElementById('resultTitle').innerHTML = '<i class="bi bi-x-circle text-danger"></i> 操作失败';
             new bootstrap.Modal(document.getElementById('resultModal')).show();
         }
-    } catch (e) {
-        if (badge) { badge.textContent = '失败'; badge.className = 'badge bg-danger'; }
-        if (msg) msg.textContent = e.message;
-        document.getElementById('resultContent').textContent = '操作: ' + action + '\n服务: ' + srvName + '\n错误: ' + e.message;
-        document.getElementById('resultTitle').innerHTML = '<i class="bi bi-x-circle text-danger"></i> 操作失败';
-        new bootstrap.Modal(document.getElementById('resultModal')).show();
-    }
+    } catch (e) { if (badge) { badge.textContent = '失败'; badge.className = 'badge bg-danger'; } if (msg) msg.textContent = e.message; }
 }
 
 {% endraw %}
 async function appControlAction(serverId, appName, action) {
     const srv = serverList.find(s => s.id === serverId);
     const srvName = srv ? (srv.name || srv.ssh_host) : serverId;
+    const badge = document.getElementById('app-status-badge-' + serverId + '-' + appName);
+    const msg = document.getElementById('app-status-msg-' + serverId + '-' + appName);
     if (action !== 'status') {
         const labels = {start:'启动', stop:'停止', restart:'重启'};
         const cfm = await swalConfirm(`确定${labels[action]}应用 ${appName} (${srvName}) 吗？`, '确认' + labels[action]);
@@ -345,29 +379,21 @@ async function appControlAction(serverId, appName, action) {
     }
     try {
         const result = await apiFetch('/api/servers/' + serverId + '/app-control', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({action: action, app: appName})
+            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action: action, app: appName})
         });
         if (action === 'status') {
-            const badge = document.getElementById('app-status-badge-' + serverId + '-' + appName);
-            const msg = document.getElementById('app-status-msg-' + serverId + '-' + appName);
-            if (badge) {
-                badge.textContent = result.running ? '运行中' : '已停止';
-                badge.className = result.running ? 'badge bg-success' : 'badge bg-danger';
-            }
+            setStatusDot('app-status-dot-' + serverId + '-' + appName, badge, result.running ? 'running' : 'stopped');
             if (msg) msg.textContent = result.msg || '';
             return;
         }
         if (result.ok) {
-            const log = `应用: ${appName}\n服务: ${srvName}\n操作: ${action}\n结果: 成功\n\n${result.output || result.msg || ''}`;
-            document.getElementById('resultContent').textContent = log;
-            document.getElementById('resultTitle').innerHTML = '<i class="bi bi-check-circle text-success"></i> 应用' + (action === 'start' ? '启动' : action === 'stop' ? '停止' : '重启') + '成功';
+            setStatusDot('app-status-dot-' + serverId + '-' + appName, badge, action === 'stop' ? 'stopped' : 'running');
+            document.getElementById('resultContent').textContent = `应用: ${appName}\n服务: ${srvName}\n操作: ${action}\n结果: 成功\n\n${result.output || result.msg || ''}`;
+            document.getElementById('resultTitle').innerHTML = '<i class="bi bi-check-circle text-success"></i> 应用' + (action==='start'?'启动':action==='stop'?'停止':'重启') + '成功';
             new bootstrap.Modal(document.getElementById('resultModal')).show();
             setTimeout(() => appControlAction(serverId, appName, 'status'), 2000);
         } else {
-            const log = `应用: ${appName}\n服务: ${srvName}\n操作: ${action}\n结果: 失败\n错误: ${result.msg || ''}\n\n${result.output || ''}`;
-            document.getElementById('resultContent').textContent = log;
+            document.getElementById('resultContent').textContent = `应用: ${appName}\n服务: ${srvName}\n操作: ${action}\n结果: 失败\n错误: ${result.msg || ''}\n\n${result.output || ''}`;
             document.getElementById('resultTitle').innerHTML = '<i class="bi bi-x-circle text-danger"></i> 应用操作失败';
             new bootstrap.Modal(document.getElementById('resultModal')).show();
         }
@@ -378,60 +404,17 @@ async function appControlAction(serverId, appName, action) {
     }
 }
 
-let appSvcModal = null;
-
-function openAppSvcModal(serverId, appName) {
-    const srv = serverList.find(s => s.id === serverId);
-    if (!srv) return;
-    const app = (srv.apps || []).find(a => a.name === appName);
-    if (!app) return;
-    document.getElementById('appSvcModalServerId').value = serverId;
-    document.getElementById('appSvcModalAppName').value = appName;
-    document.getElementById('appSvcModalTitle').textContent = appName;
-    document.getElementById('appSvcModalName').value = app.svc_name || appName;
-    document.getElementById('appSvcModalMgr').value = app.svc_mgr || 'script';
-    document.getElementById('appSvcModalStartCmd').value = app.start_cmd || '';
-    document.getElementById('appSvcModalStopCmd').value = app.stop_cmd || '';
-    onAppSvcMgrChange();
-    if (!appSvcModal) appSvcModal = new bootstrap.Modal(document.getElementById('appSvcModal'));
-    appSvcModal.show();
-}
-
-function onAppSvcMgrChange() {
-    document.getElementById('appSvcScriptGroup').style.display =
-        document.getElementById('appSvcModalMgr').value === 'script' ? '' : 'none';
-}
-
-async function saveAppSvcModal() {
-    const serverId = document.getElementById('appSvcModalServerId').value;
-    const appName = document.getElementById('appSvcModalAppName').value;
-    const name = document.getElementById('appSvcModalName').value || appName;
-    const mgr = document.getElementById('appSvcModalMgr').value || 'script';
-    const srv = serverList.find(s => s.id === serverId);
-    if (!srv) return;
-    const apps = (srv.apps || []).map(a => {
-        if (a.name !== appName) return a;
-        const updated = {...a, svc_name: name, svc_mgr: mgr};
-        if (mgr === 'script') {
-            updated.start_cmd = document.getElementById('appSvcModalStartCmd').value.trim();
-            updated.stop_cmd = document.getElementById('appSvcModalStopCmd').value.trim();
+// ── 一键全部状态查询 ──
+async function queryAllStatus() {
+    const rows = document.querySelectorAll('tbody tr:not(.table-active)');
+    for (const row of rows) {
+        const btn = row.querySelector('button[onclick*="status"]');
+        if (btn) {
+            const match = btn.getAttribute('onclick').match(/controlAction\('([^']+)',\s*'status'/);
+            if (match) { controlAction(match[1], 'status', true); }
+            const match2 = btn.getAttribute('onclick').match(/appControlAction\('([^']+)',\s*'([^']+)',\s*'status'/);
+            if (match2) { appControlAction(match2[1], match2[2], 'status'); }
         }
-        return updated;
-    });
-    try {
-        const resp = await apiFetch('/api/servers/' + serverId, {
-            method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({apps: apps})
-        });
-        if (resp.status === 'ok') {
-            appSvcModal.hide();
-            location.reload();
-        } else {
-            swalError(resp.error || '未知错误');
-        }
-    } catch (e) {
-        swalError(e.message);
     }
 }
 

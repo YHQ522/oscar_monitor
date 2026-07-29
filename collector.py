@@ -62,6 +62,183 @@ QUERY_SETS = {
     },
 }
 
+# ═══════════════════════════════════════════════════════════
+#  MySQL 监控查询集
+# ═══════════════════════════════════════════════════════════
+MYSQL_QUERY_SETS = {
+    "basic_info": {
+        "label": "\u57fa\u7840\u4fe1\u606f",
+        "queries": {
+            "version": "SELECT VERSION();",
+            "version_detail": "SHOW VARIABLES LIKE 'version_comment';",
+            "non_default_params": "SELECT VARIABLE_NAME, VARIABLE_VALUE FROM performance_schema.global_variables WHERE VARIABLE_NAME IN ('max_connections','innodb_buffer_pool_size','innodb_log_file_size','innodb_flush_log_at_trx_commit','sync_binlog','query_cache_size','tmp_table_size','max_heap_table_size','thread_cache_size','table_open_cache','innodb_io_capacity');",
+        }
+    },
+    "db_info": {
+        "label": "\u6570\u636e\u5e93\u4fe1\u606f",
+        "queries": {
+            "database_info": "SELECT SCHEMA_NAME, DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME NOT IN ('information_schema','mysql','performance_schema','sys') ORDER BY SCHEMA_NAME;",
+            "ha_slave_info": "SHOW SLAVE STATUS\\G",
+        }
+    },
+    "storage": {
+        "label": "\u5b58\u50a8\u7a7a\u95f4",
+        "queries": {
+            "effective_space": "SELECT CONCAT(ROUND(SUM(data_length+index_length)/1024/1024,2),' MB') AS EFFECTIVE_SPACE FROM information_schema.tables;",
+            "schema_space": "SELECT TABLE_SCHEMA, CONCAT(ROUND(SUM(data_length+index_length)/1024/1024,2),' M') TOTAL_SPACE FROM information_schema.tables WHERE TABLE_SCHEMA NOT IN ('information_schema','mysql','performance_schema','sys') GROUP BY TABLE_SCHEMA ORDER BY SUM(data_length+index_length) DESC;",
+            "datafile_info": "SELECT TABLE_NAME, TABLE_ROWS, ROUND((data_length+index_length)/1024/1024,2) AS SIZE_MB, ROUND(data_length/1024/1024,2) AS DATA_MB, ROUND(index_length/1024/1024,2) AS INDEX_MB FROM information_schema.tables WHERE TABLE_SCHEMA NOT IN ('information_schema','mysql','performance_schema','sys') ORDER BY (data_length+index_length) DESC LIMIT 30;",
+            "logfile_info": "SELECT @@innodb_log_file_size/1024/1024 AS LOG_FILE_SIZE_MB, @@innodb_log_files_in_group AS LOG_FILES_IN_GROUP;",
+        }
+    },
+    "objects": {
+        "label": "\u6570\u636e\u5e93\u5bf9\u8c61\u7edf\u8ba1",
+        "queries": {
+            "table_count_total": "SELECT COUNT(*) TOTAL_TABLE_NUM FROM information_schema.tables WHERE TABLE_TYPE='BASE TABLE' AND TABLE_SCHEMA NOT IN ('information_schema','mysql','performance_schema','sys');",
+            "table_count_by_user": "SELECT TABLE_SCHEMA, COUNT(*) TABLE_COUNT FROM information_schema.tables WHERE TABLE_TYPE='BASE TABLE' AND TABLE_SCHEMA NOT IN ('information_schema','mysql','performance_schema','sys') GROUP BY TABLE_SCHEMA ORDER BY COUNT(*) DESC;",
+            "index_count_total": "SELECT COUNT(*) TOTAL_INDEX_NUM FROM information_schema.statistics WHERE TABLE_SCHEMA NOT IN ('information_schema','mysql','performance_schema','sys');",
+            "view_count_total": "SELECT COUNT(*) TOTAL_VIEW_NUM FROM information_schema.views WHERE TABLE_SCHEMA NOT IN ('information_schema','mysql','performance_schema','sys');",
+            "proc_count_total": "SELECT COUNT(*) TOTAL_PROC_NUM FROM information_schema.routines WHERE ROUTINE_SCHEMA NOT IN ('information_schema','mysql','performance_schema','sys');",
+        }
+    },
+    "performance": {
+        "label": "\u6027\u80fd\u76d1\u63a7",
+        "queries": {
+            "session_count": "SELECT COUNT(*) AS CONNECTION_COUNT FROM information_schema.PROCESSLIST;",
+            "session_by_ip": "SELECT COUNT(*) AS CNT, HOST FROM information_schema.PROCESSLIST GROUP BY HOST ORDER BY CNT DESC LIMIT 30;",
+            "deadlock_count": "SHOW ENGINE INNODB STATUS\\G",
+            "active_queries": "SELECT ID, USER, HOST, DB, COMMAND, TIME, STATE, LEFT(INFO,200) AS INFO FROM information_schema.PROCESSLIST WHERE COMMAND != 'Sleep' AND INFO IS NOT NULL ORDER BY TIME DESC;",
+            "db_memory": "SELECT VARIABLE_NAME, VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME IN ('Innodb_buffer_pool_reads','Innodb_buffer_pool_read_requests','Innodb_buffer_pool_pages_total','Innodb_buffer_pool_pages_free','Innodb_buffer_pool_pages_dirty','Threads_connected','Threads_running','Innodb_rows_deleted','Innodb_rows_inserted','Innodb_rows_read','Innodb_rows_updated','Bytes_received','Bytes_sent','Qcache_hits','Qcache_inserts','Slow_queries');",
+            "slow_sql": "SELECT TIME/1000 AS TIME_S, SQL_TEXT FROM mysql.slow_log WHERE TIME/1000 > 0.5 ORDER BY TIME DESC LIMIT 20;",
+        }
+    },
+}
+
+# ═══════════════════════════════════════════════════════════
+#  PostgreSQL 监控查询集
+# ═══════════════════════════════════════════════════════════
+POSTGRESQL_QUERY_SETS = {
+    "basic_info": {
+        "label": "\u57fa\u7840\u4fe1\u606f",
+        "queries": {
+            "version": "SELECT VERSION();",
+            "version_detail": "SELECT current_setting('server_version') AS version_detail, current_setting('server_version_num') AS version_num;",
+            "non_default_params": "SELECT name, setting FROM pg_settings WHERE source != 'default' AND name NOT LIKE 'application_name' ORDER BY name;",
+        }
+    },
+    "db_info": {
+        "label": "\u6570\u636e\u5e93\u4fe1\u606f",
+        "queries": {
+            "database_info": "SELECT datname, pg_encoding_to_char(encoding), datcollate, pg_size_pretty(pg_database_size(datname)) AS size, datconnlimit FROM pg_database WHERE datistemplate = false ORDER BY datname;",
+            "ha_slave_info": "SELECT application_name, client_addr, state, sync_state, pg_wal_lsn_diff(pg_current_wal_lsn(),replay_lsn) AS replay_lag_bytes FROM pg_stat_replication;",
+        }
+    },
+    "storage": {
+        "label": "\u5b58\u50a8\u7a7a\u95f4",
+        "queries": {
+            "effective_space": "SELECT pg_size_pretty(pg_database_size(current_database())) AS EFFECTIVE_SPACE;",
+            "schema_space": "SELECT schemaname, pg_size_pretty(SUM(pg_total_relation_size(schemaname||'.'||tablename))) AS TOTAL_SPACE FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema') GROUP BY schemaname ORDER BY SUM(pg_total_relation_size(schemaname||'.'||tablename)) DESC;",
+            "datafile_info": "SELECT tablename, schemaname, pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS total_size, pg_size_pretty(pg_relation_size(schemaname||'.'||tablename)) AS table_size, pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)-pg_relation_size(schemaname||'.'||tablename)) AS index_size FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema') ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC LIMIT 30;",
+            "logfile_info": "SELECT name, setting FROM pg_settings WHERE name IN ('wal_segment_size','wal_keep_size','max_wal_size','min_wal_size');",
+        }
+    },
+    "objects": {
+        "label": "\u6570\u636e\u5e93\u5bf9\u8c61\u7edf\u8ba1",
+        "queries": {
+            "table_count_total": "SELECT COUNT(*) TOTAL_TABLE_NUM FROM information_schema.tables WHERE table_type='BASE TABLE' AND table_schema NOT IN ('pg_catalog','information_schema');",
+            "table_count_by_user": "SELECT table_schema, COUNT(*) TABLE_COUNT FROM information_schema.tables WHERE table_type='BASE TABLE' AND table_schema NOT IN ('pg_catalog','information_schema') GROUP BY table_schema ORDER BY COUNT(*) DESC;",
+            "index_count_total": "SELECT COUNT(*) TOTAL_INDEX_NUM FROM pg_indexes WHERE schemaname NOT IN ('pg_catalog','information_schema');",
+            "view_count_total": "SELECT COUNT(*) TOTAL_VIEW_NUM FROM information_schema.views WHERE table_schema NOT IN ('pg_catalog','information_schema');",
+            "proc_count_total": "SELECT COUNT(*) TOTAL_PROC_NUM FROM information_schema.routines WHERE routine_schema NOT IN ('pg_catalog','information_schema');",
+        }
+    },
+    "performance": {
+        "label": "\u6027\u80fd\u76d1\u63a7",
+        "queries": {
+            "session_count": "SELECT COUNT(*) AS CONNECTION_COUNT FROM pg_stat_activity;",
+            "session_by_ip": "SELECT COUNT(*) AS CNT, client_addr FROM pg_stat_activity GROUP BY client_addr ORDER BY CNT DESC;",
+            "deadlock_count": "SELECT COUNT(*) AS DEADLOCK_COUNT FROM pg_stat_database WHERE deadlocks IS NOT NULL;",
+            "active_queries": "SELECT pid, usename, application_name, client_addr, state, query_start, LEFT(query,200) AS query FROM pg_stat_activity WHERE state != 'idle' AND query NOT LIKE '%pg_stat_activity%' ORDER BY query_start;",
+            "db_memory": "SELECT name, setting, unit, context FROM pg_settings WHERE name IN ('shared_buffers','effective_cache_size','work_mem','maintenance_work_mem','wal_buffers','autovacuum_work_mem','max_connections');",
+            "slow_sql": "SELECT total_exec_time/1000 AS time_s, LEFT(query,300) AS query, calls, mean_exec_time/1000 AS avg_time_ms FROM pg_stat_statements WHERE total_exec_time/1000 > 0.5 ORDER BY total_exec_time DESC LIMIT 20;",
+        }
+    },
+}
+
+# ═══════════════════════════════════════════════════════════
+#  Oracle 监控查询集
+# ═══════════════════════════════════════════════════════════
+ORACLE_QUERY_SETS = {
+    "basic_info": {
+        "label": "\u57fa\u7840\u4fe1\u606f",
+        "queries": {
+            "version": "SELECT BANNER FROM V$VERSION WHERE ROWNUM=1;",
+            "version_detail": "SELECT * FROM V$VERSION;",
+            "non_default_params": "SELECT NAME, VALUE, ISDEFAULT FROM V$PARAMETER WHERE ISDEFAULT='FALSE' AND NAME NOT LIKE '\\_%' ESCAPE '\\' AND ROWNUM<=50;",
+        }
+    },
+    "db_info": {
+        "label": "\u6570\u636e\u5e93\u4fe1\u606f",
+        "queries": {
+            "database_info": "SELECT NAME, DBID, CREATED, LOG_MODE, OPEN_MODE, DATABASE_ROLE, FLASHBACK_ON, FORCE_LOGGING FROM V$DATABASE;",
+            "ha_slave_info": "SELECT DATABASE_ROLE, PROTECTION_MODE, PROTECTION_LEVEL FROM V$DATABASE;",
+        }
+    },
+    "storage": {
+        "label": "\u5b58\u50a8\u7a7a\u95f4",
+        "queries": {
+            "effective_space": "SELECT ROUND(SUM(BYTES)/1024/1024/1024,2)||' GB' AS EFFECTIVE_SPACE FROM DBA_DATA_FILES;",
+            "schema_space": "SELECT OWNER, ROUND(SUM(BYTES)/1024/1024,2)||' M' TOTAL_SPACE FROM DBA_SEGMENTS GROUP BY OWNER ORDER BY SUM(BYTES) DESC;",
+            "tablespace_info": "SELECT TABLESPACE_NAME, ROUND(SUM(BYTES)/1024/1024,2) AS SIZE_MB, ROUND(SUM(MAXBYTES)/1024/1024,2) AS MAX_MB FROM DBA_DATA_FILES GROUP BY TABLESPACE_NAME ORDER BY TABLESPACE_NAME;",
+            "datafile_info": "SELECT FILE_NAME, TABLESPACE_NAME, ROUND(BYTES/1024/1024,2)||' M' CURRENT_SIZE, ROUND(MAXBYTES/1024/1024,2)||' M' MAX_SIZE, AUTOEXTENSIBLE FROM DBA_DATA_FILES ORDER BY BYTES DESC;",
+            "logfile_info": "SELECT GROUP#, THREAD#, SEQUENCE#, ROUND(BYTES/1024/1024)||' M' SIZE_MB, MEMBERS, STATUS FROM V$LOG;",
+            "table_disk_space": "SELECT ROUND(SUM(BYTES)/1024/1024,2)||' MB' TABLE_SPACE FROM DBA_SEGMENTS WHERE SEGMENT_TYPE='TABLE';",
+            "index_disk_space": "SELECT ROUND(SUM(BYTES)/1024/1024,2)||' MB' INDEX_SPACE FROM DBA_SEGMENTS WHERE SEGMENT_TYPE='INDEX';",
+        }
+    },
+    "objects": {
+        "label": "\u6570\u636e\u5e93\u5bf9\u8c61\u7edf\u8ba1",
+        "queries": {
+            "table_count_total": "SELECT COUNT(*) TOTAL_TABLE_NUM FROM DBA_TABLES WHERE OWNER NOT IN ('SYS','SYSTEM','XDB','WMSYS','OUTLN','DBSNMP','ORDSYS','ORDDATA','CTXSYS','MDSYS','OLAPSYS');",
+            "table_count_by_user": "SELECT OWNER, COUNT(*) TABLE_COUNT FROM DBA_TABLES GROUP BY OWNER ORDER BY COUNT(*) DESC;",
+            "index_count_total": "SELECT COUNT(*) TOTAL_INDEX_NUM FROM DBA_INDEXES WHERE OWNER NOT IN ('SYS','SYSTEM','XDB','WMSYS','OUTLN','DBSNMP','ORDSYS','ORDDATA','CTXSYS','MDSYS','OLAPSYS');",
+            "index_count_by_user": "SELECT OWNER, COUNT(*) INDEX_COUNT FROM DBA_INDEXES GROUP BY OWNER ORDER BY COUNT(*) DESC;",
+            "view_count_total": "SELECT COUNT(*) TOTAL_VIEW_NUM FROM DBA_VIEWS WHERE OWNER NOT IN ('SYS','SYSTEM','XDB','WMSYS','OUTLN','DBSNMP');",
+            "proc_count_total": "SELECT COUNT(*) TOTAL_PROC_NUM FROM DBA_PROCEDURES WHERE OWNER NOT IN ('SYS','SYSTEM','XDB','WMSYS','OUTLN','DBSNMP');",
+        }
+    },
+    "performance": {
+        "label": "\u6027\u80fd\u76d1\u63a7",
+        "queries": {
+            "session_count": "SELECT COUNT(*) AS CONNECTION_COUNT FROM V$SESSION;",
+            "session_by_ip": "SELECT COUNT(*), MACHINE FROM V$SESSION GROUP BY MACHINE ORDER BY COUNT(*) DESC;",
+            "deadlock_count": "SELECT COUNT(*) AS DEADLOCK_COUNT FROM V$LOCK WHERE BLOCK=1;",
+            "wait_chains": "SELECT * FROM V$WAIT_CHAINS WHERE ROWNUM<=20;",
+            "active_queries": "SELECT SID, SERIAL#, USERNAME, MACHINE, SQL_ID, STATUS, LAST_CALL_ET FROM V$SESSION WHERE STATUS='ACTIVE' AND USERNAME IS NOT NULL;",
+            "non_auto_commit": "SELECT COUNT(*) AS ACTIVE_TRANSACTIONS FROM V$TRANSACTION;",
+            "db_memory": "SELECT COMPONENT, CURRENT_SIZE/1024/1024||' MB' AS SIZE_MB, MIN_SIZE/1024/1024||' MB' MIN_MB, MAX_SIZE/1024/1024||' MB' MAX_MB FROM V$MEMORY_DYNAMIC_COMPONENTS WHERE CURRENT_SIZE>0;",
+            "slow_sql": "SELECT * FROM (SELECT ELAPSED_TIME/1000000 AS TIME_S, SQL_TEXT FROM V$SQL WHERE ELAPSED_TIME/1000000 > 0.5 AND SQL_TEXT NOT LIKE '%V$SQL%' ORDER BY ELAPSED_TIME DESC) WHERE ROWNUM<=20;",
+        }
+    },
+}
+
+# ═══ 查询集适配器映射 ═══
+QUERY_ADAPTERS = {
+    "oscar": QUERY_SETS,
+    "shentong": QUERY_SETS,
+    "mysql": MYSQL_QUERY_SETS,
+    "postgresql": POSTGRESQL_QUERY_SETS,
+    "pg": POSTGRESQL_QUERY_SETS,
+    "oracle": ORACLE_QUERY_SETS,
+}
+
+
+def get_query_sets(db_type):
+    """根据数据库类型返回对应的查询集，未知类型兜底为 Oscar"""
+    if not db_type:
+        return QUERY_SETS
+    return QUERY_ADAPTERS.get(db_type, QUERY_SETS)
+
+
 OS_CHECKS_LINUX = {
     "memory": "free -h 2>/dev/null || cat /proc/meminfo 2>/dev/null | head -20",
     "disk": "df -h 2>/dev/null",
@@ -217,12 +394,34 @@ def _temp_sql_path(server_config):
 
 
 def _build_sql_cmd(server_config, sql, sql_file):
-    qt = shlex.quote(_db_userpass(server_config))
+    db_type = server_config.get('db_type', 'oscar') or 'oscar'
     isql_cmd = server_config.get('isql_cmd', 'isql')
     db_host = server_config.get('db_host', '127.0.0.1')
     db_port = server_config.get('db_port', 2003)
     db_name = server_config.get('db_name', 'OSRDB')
-    isql = f"{isql_cmd} -h {db_host} -p {db_port} -d {db_name} -U {qt}"
+    db_user = server_config.get('db_user', 'SYSDBA')
+    db_pass = server_config.get('db_pass', '')
+
+    # 根据数据库类型构建 CLI 命令
+    if db_type in ('oscar', 'shentong'):
+        cred = shlex.quote(f"{db_user}/{db_pass}" if db_pass else db_user)
+        cli = f"{isql_cmd} -h {db_host} -p {db_port} -d {db_name} -U {cred}"
+    elif db_type == 'mysql':
+        pwd_part = f" -p{db_pass}" if db_pass else ""
+        cli = f'{isql_cmd} -h {db_host} -P {db_port} -u {db_user}{pwd_part} {db_name}'
+    elif db_type in ('postgresql', 'pg'):
+        env = f"set PGPASSWORD={db_pass}&& " if db_pass and _is_win(server_config) else ""
+        if not _is_win(server_config) and db_pass:
+            env = f"PGPASSWORD={shlex.quote(db_pass)} "
+            cli = f"{env}{isql_cmd} -h {db_host} -p {db_port} -U {db_user} -d {db_name}"
+        else:
+            cli = f"{env}{isql_cmd} -h {db_host} -p {db_port} -U {db_user} -d {db_name}"
+    elif db_type == 'oracle':
+        cred = f"{db_user}/{db_pass}" if db_pass else db_user
+        cli = f'{isql_cmd} -S {cred}@{db_host}:{db_port}/{db_name}'
+    else:
+        cred = shlex.quote(f"{db_user}/{db_pass}" if db_pass else db_user)
+        cli = f"{isql_cmd} -h {db_host} -p {db_port} -d {db_name} -U {cred}"
 
     if _is_win(server_config):
         # Windows: 用 Python 写 SQL 文件，避免 cmd echo 的特殊字符问题
@@ -231,9 +430,12 @@ def _build_sql_cmd(server_config, sql, sql_file):
                 f.write(sql)
         except Exception:
             pass
-        return (sql, f"cmd /c \"{isql} < {sql_file} && del {sql_file}\"")
+        # PostgreSQL psql on Windows needs different approach
+        if db_type in ('postgresql', 'pg'):
+            return (sql, f"cmd /c \"{cli} -f {sql_file} && del {sql_file}\"")
+        return (sql, f"cmd /c \"{cli} < {sql_file} && del {sql_file}\"")
     else:
-        return (sql, f"cat > {sql_file} << 'OSCAREOF'\n{sql}\nOSCAREOF\n{isql} < {sql_file} 2>&1; R=$?; rm -f {sql_file}; exit $R")
+        return (sql, f"cat > {sql_file} << 'OSCAREOF'\n{sql}\nOSCAREOF\n{cli} < {sql_file} 2>&1; R=$?; rm -f {sql_file}; exit $R")
 
 
 def _db_userpass(server_config):
@@ -764,8 +966,10 @@ def app_control(server_config, app_name, action):
 
 
 def collect_all(server_config, enabled_categories=None, enabled_os_checks=None):
+    db_type = server_config.get('db_type', 'oscar') or 'oscar'
+    query_sets = get_query_sets(db_type)
     if enabled_categories is None:
-        enabled_categories = list(QUERY_SETS.keys())
+        enabled_categories = list(query_sets.keys())
     if enabled_os_checks is None:
         enabled_os_checks = list(OS_CHECKS_LINUX.keys())
 
@@ -773,6 +977,6 @@ def collect_all(server_config, enabled_categories=None, enabled_os_checks=None):
         "server": server_config.get("name", server_config.get("ssh_host", "unknown")),
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "os_info": collect_os_info(server_config, enabled_os_checks),
-        "db_queries": collect_sql_queries(server_config, QUERY_SETS, enabled_categories),
+        "db_queries": collect_sql_queries(server_config, query_sets, enabled_categories),
         "apps": collect_apps(server_config),
     }

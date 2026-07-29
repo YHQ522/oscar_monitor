@@ -27,6 +27,15 @@
                 <div id="logDbSection" style="display:none;">
                     <div class="row g-2">
                         <div class="col-md-3">
+                            <label class="form-label small">数据库类型</label>
+                            <select class="form-select form-select-sm" id="cfgDbType" onchange="onDbTypeChange()">
+                                <option value="oscar">Oscar (神通)</option>
+                                <option value="mysql">MySQL</option>
+                                <option value="postgresql">PostgreSQL</option>
+                                <option value="oracle">Oracle</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
                             <label class="form-label small">日志保留天数</label>
                             <input class="form-control form-control-sm" id="cfgRetentionDays" value="30" type="number" min="1" max="365">
                         </div>
@@ -88,11 +97,11 @@
             </div>
         </div>
 
-        <div class="text-end">
-            <span id="configResult" class="me-2 small"></span>
+        <div class="d-flex justify-content-end gap-1 mb-2">
             <button type="button" class="btn btn-outline-success btn-sm" onclick="testLogDb()"><i class="bi bi-plug"></i> 测试连接</button>
             <button type="submit" class="btn btn-primary btn-sm">保存配置</button>
         </div>
+        <div id="configResult" class="small text-break" style="max-height:120px;overflow-y:auto;"></div>
     </div>
 </div>
 </form>
@@ -115,6 +124,7 @@ function loadForm() {
     document.getElementById('cfgServerDbEnabled').checked = config.server_db_enabled || false;
     document.getElementById('cfgRetentionDays').value = config.log_retention_days || 30;
     document.getElementById('cfgWorkers').value = config.collect_workers || 8;
+    document.getElementById('cfgDbType').value = db.db_type || 'oscar';
     document.getElementById('cfgLogDbHost').value = db.host || '127.0.0.1';
     document.getElementById('cfgLogDbPort').value = db.port || 2003;
     document.getElementById('cfgLogDbUser').value = db.user || 'SYSDBA';
@@ -128,12 +138,31 @@ function loadForm() {
     toggleLogDb();
 }
 
+// 数据库类型切换时自动更新默认端口和 CLI 工具
+const DB_DEFAULTS = {
+    oscar:      { port:2003, user:'SYSDBA', db:'OSRDB', isql:'isql' },
+    mysql:      { port:3306, user:'root',   db:'mysql', isql:'mysql' },
+    postgresql: { port:5432, user:'postgres',db:'postgres', isql:'psql' },
+    oracle:     { port:1521, user:'system', db:'ORCL',  isql:'sqlplus' },
+};
+
+function onDbTypeChange() {
+    const t = document.getElementById('cfgDbType').value;
+    const d = DB_DEFAULTS[t] || DB_DEFAULTS.oscar;
+    document.getElementById('cfgLogDbPort').value = d.port;
+    document.getElementById('cfgLogDbUser').value = d.user;
+    document.getElementById('cfgLogDbName').value = d.db;
+    document.getElementById('cfgLogDbIsql').value = d.isql;
+}
+
 document.getElementById('configForm').addEventListener('submit', async function(e) {
     e.preventDefault();
-    document.getElementById('configResult').className = 'text-warning small';
+    document.getElementById('configResult').className = 'small text-break text-warning';
     document.getElementById('configResult').textContent = '保存中...';
     const data = {
         log_db: {
+            db_type: document.getElementById('cfgDbType').value || 'oscar',
+            host: document.getElementById('cfgLogDbHost').value,
             port: parseInt(document.getElementById('cfgLogDbPort').value) || 2003,
             user: document.getElementById('cfgLogDbUser').value,
             pass: document.getElementById('cfgLogDbPass').value,
@@ -165,9 +194,10 @@ document.getElementById('configForm').addEventListener('submit', async function(
 });
 
 async function testLogDb() {
-    document.getElementById('configResult').className = 'text-warning small';
+    document.getElementById('configResult').className = 'small text-break text-warning';
     document.getElementById('configResult').textContent = '测试中...';
     const data = {
+        db_type: document.getElementById('cfgDbType').value || 'oscar',
         host: document.getElementById('cfgLogDbHost').value,
         port: parseInt(document.getElementById('cfgLogDbPort').value) || 2003,
         user: document.getElementById('cfgLogDbUser').value,

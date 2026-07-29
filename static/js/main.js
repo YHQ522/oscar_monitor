@@ -57,7 +57,7 @@ function swalConfirm(msg, title) {
         cancelButtonText: '取消',
         reverseButtons: false,
         focusCancel: true,
-        iconColor: '#1E3A5F',
+        iconColor: '#6366F1',
     });
 }
 function swalDanger(msg, title) {
@@ -82,7 +82,7 @@ function swalInfo(msg, title) {
         title: title || '提示',
         html: `<div class="swal-msg">${escapeHtml(msg)}</div>`,
         confirmButtonText: '知道了',
-        iconColor: '#1E3A5F',
+        iconColor: '#6366F1',
     });
 }
 
@@ -109,25 +109,75 @@ function collectApps(prefix) {
         const svc = row.querySelector('.app-svc').value.trim();
         const inControl = row.querySelector('.app-in-control').checked;
         if (name && port) {
-            items.push({name: name, port: port, svc_name: svc || name, in_control: inControl});
+            items.push({
+                name: name, port: port, svc_name: svc || name, in_control: inControl,
+                group: row.querySelector('.app-group')?.value || '',
+                health_url: row.querySelector('.app-health-url')?.value || '',
+                start_cmd: row.querySelector('.app-start-cmd')?.value || '',
+                stop_cmd: row.querySelector('.app-stop-cmd')?.value || '',
+                svc_mgr: row.querySelector('.app-svc-mgr')?.value || '',
+            });
         }
     });
     return items;
 }
 
-function addAppRow(prefix) {
+function addAppRow(prefix, data) {
+    data = data || {};
     const list = document.getElementById(prefix + 'AppList');
     const div = document.createElement('div');
     div.className = prefix + 'app-row border rounded p-2 mb-2 bg-light';
     div.innerHTML = '<div class="row g-1">' +
-        '<div class="col-md-3"><input class="form-control form-control-sm app-name" placeholder="应用名称"></div>' +
-        '<div class="col-md-2"><input class="form-control form-control-sm app-port" type="number" placeholder="端口"></div>' +
-        '<div class="col-md-3"><input class="form-control form-control-sm app-svc" placeholder="服务名"></div>' +
-        '<div class="col-md-2"><div class="form-check"><input class="form-check-input app-in-control" type="checkbox"><label class="form-check-label small">加入启停管控</label></div></div>' +
+        '<div class="col-md-3"><input class="form-control form-control-sm app-name" placeholder="应用名称" value="' + (data.name || '') + '"></div>' +
+        '<div class="col-md-2"><input class="form-control form-control-sm app-port" type="number" placeholder="端口" value="' + (data.port || '') + '"></div>' +
+        '<div class="col-md-3"><input class="form-control form-control-sm app-svc" placeholder="服务名" value="' + (data.svc_name || '') + '"></div>' +
+        '<div class="col-md-2"><div class="form-check"><input class="form-check-input app-in-control" type="checkbox"' + (data.in_control ? ' checked' : '') + '><label class="form-check-label small">加入启停管控</label></div></div>' +
         '<div class="col-md-auto"><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest(\'.' + prefix + 'app-row\').remove()">&times;</button></div>' +
+        '<input type="hidden" class="app-group" value="' + (data.group || '') + '">' +
+        '<input type="hidden" class="app-health-url" value="' + (data.health_url || '') + '">' +
+        '<input type="hidden" class="app-start-cmd" value="' + (data.start_cmd || '') + '">' +
+        '<input type="hidden" class="app-stop-cmd" value="' + (data.stop_cmd || '') + '">' +
+        '<input type="hidden" class="app-svc-mgr" value="' + (data.svc_mgr || '') + '">' +
         '</div>';
     list.appendChild(div);
 }
+
+// ── 应用模板 ──
+var appTemplates = {};
+async function loadAppTemplates() {
+    try {
+        var resp = await apiFetch('/api/app-templates');
+        appTemplates = resp;
+        ['add', 'edit'].forEach(function(prefix) {
+            var sel = document.getElementById(prefix + 'AppTemplate');
+            if (!sel) return;
+            sel.innerHTML = '<option value="">📋 快速添加...</option>';
+            Object.keys(appTemplates).forEach(function(key) {
+                var t = appTemplates[key];
+                sel.innerHTML += '<option value="' + key + '">' + t.name + '</option>';
+            });
+        });
+    } catch(e) {}
+}
+
+function applyTemplate(prefix, key) {
+    if (!key || !appTemplates[key]) return;
+    var t = appTemplates[key];
+    document.getElementById(prefix + 'AppTemplate').value = '';
+    addAppRow(prefix, {
+        name: t.name, port: t.port, svc_name: t.svc_name || t.name,
+        group: t.group || '', health_url: t.health_url || '',
+        start_cmd: t.start_cmd || '', stop_cmd: t.stop_cmd || '',
+        svc_mgr: t.svc_mgr || '', in_control: true
+    });
+}
+
+// 自动加载模板
+document.addEventListener('DOMContentLoaded', function() {
+    if (document.getElementById('addAppTemplate') || document.getElementById('editAppTemplate')) {
+        loadAppTemplates();
+    }
+});
 
 function toggleCheckAll(sectionId, cls, checked) {
     document.querySelectorAll('#' + sectionId + ' .' + cls).forEach(c => {

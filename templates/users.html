@@ -4,52 +4,63 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h4 class="mb-0"><i class="bi bi-people"></i> 用户管理</h4>
     <div class="d-flex align-items-center gap-2">
-        <input type="text" class="form-control form-control-sm search-box" id="searchBox" placeholder="搜索..." oninput="filterUserTable()">
+        <input type="text" class="form-control form-control-sm search-box" id="searchBox" placeholder="搜索用户..." oninput="filterUserTable()" style="width:180px;">
         <button class="btn btn-primary btn-sm flex-shrink-0" onclick="openAdd()"><i class="bi bi-plus-circle"></i> 添加用户</button>
     </div>
 </div>
 
-<div class="table-responsive">
-    <table class="table table-sm table-hover">
-        <thead class="table-light">
+<div class="card mb-3">
+    <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0">
+        <thead>
             <tr>
-                <th>用户名</th>
-                <th>角色</th>
-                <th>权限</th>
-                <th>操作</th>
+                <th style="width:20%;">用户名</th>
+                <th style="width:12%;">角色</th>
+                <th style="width:48%;">权限</th>
+                <th style="width:20%;">操作</th>
             </tr>
         </thead>
         <tbody>
             {% for u in users %}
             <tr>
-                <td><strong>{{ u.username }}</strong></td>
-                <td>{% if u.username == 'admin' %}<span class="badge bg-danger">管理员</span>{% else %}<span class="badge bg-secondary">普通用户</span>{% endif %}</td>
+                <td>
+                    <div class="d-flex align-items-center gap-2">
+                        <div class="rounded-circle d-flex align-items-center justify-content-center" style="width:32px;height:32px;background:{% if u.is_admin %}linear-gradient(135deg,#6366F1,#818CF8){% else %}linear-gradient(135deg,#06B6D4,#22D3EE){% endif %};color:#fff;font-size:0.8rem;font-weight:600;">{{ u.username[0]|upper }}</div>
+                        <strong>{{ u.username }}</strong>
+                    </div>
+                </td>
+                <td>{% if u.is_admin %}<span class="badge" style="background:linear-gradient(135deg,#6366F1,#818CF8);color:#fff;">管理员</span>{% else %}<span class="badge" style="background:rgba(6,182,212,0.15);color:#0891B2;">普通用户</span>{% endif %}</td>
                 <td class="small">
                     {% if u.is_admin %}
-                    全部权限
+                    <span class="badge" style="background:rgba(245,158,11,0.15);color:#B45309;">全部权限</span>
                     {% else %}
-                    {% for p in u.perms %}<span class="badge bg-light text-dark me-1">{{ permissions.get(p, p) }}</span>{% else %}<span class="text-muted">无</span>{% endfor %}
+                    {% for p in u.perms %}<span class="badge me-1" style="background:rgba(99,102,241,0.08);color:var(--primary);">{{ permissions.get(p, p) }}</span>{% else %}<span class="text-muted">无</span>{% endfor %}
                     {% endif %}
                 </td>
                 <td>
-                    <button class="btn btn-outline-secondary btn-sm" onclick="openEdit('{{ u.username }}')"><i class="bi bi-pencil"></i></button>
-                    {% if u.username != 'admin' %}
-                    <button class="btn btn-outline-danger btn-sm" onclick="delUser('{{ u.username }}')"><i class="bi bi-trash"></i></button>
+                    <button class="btn btn-outline-secondary btn-sm me-1" onclick="openEdit('{{ u.username }}')" title="编辑"><i class="bi bi-pencil"></i></button>
+                    {% if not u.is_admin and u.username != 'admin' %}
+                    <button class="btn btn-outline-danger btn-sm" onclick="delUser('{{ u.username }}')" title="删除"><i class="bi bi-trash"></i></button>
                     {% endif %}
                 </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
+    </div>
 </div>
 
-<div class="card mt-3 border-warning" id="lockedCard">
-    <div class="card-header py-1 d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-lock"></i> <strong>登录锁定</strong></span>
-        <button class="btn btn-outline-light btn-sm py-0 border-2" onclick="refreshLocked()"><i class="bi bi-arrow-clockwise"></i> 刷新</button>
+<div class="card" id="lockedCard">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-shield-lock"></i> <strong>登录锁定</strong></span>
+        <button class="btn btn-sm" style="background:rgba(99,102,241,0.1);color:var(--primary);border:none;" onclick="refreshLocked()"><i class="bi bi-arrow-clockwise"></i> 刷新</button>
     </div>
-    <div class="card-body p-2">
-        <div id="lockedList" class="small text-muted">加载中...</div>
+    <div class="card-body">
+        <div id="lockedList" style="min-height:40px;">
+            <div class="text-center py-2 text-muted">
+                <div class="spinner-border spinner-border-sm me-2" role="status" style="color:var(--primary);"></div>加载中...
+            </div>
+        </div>
     </div>
 </div>
 
@@ -178,24 +189,24 @@ async function refreshLocked() {
         const data = await apiFetch('/api/admin/locked-ips');
         const locked = data.locked || [];
         if (locked.length === 0) {
-            list.innerHTML = '<div class="text-center py-1"><i class="bi bi-check-circle text-success"></i> 当前没有被封锁的 IP</div>';
+            list.innerHTML = '<div class="text-center py-3"><div class="mb-2"><span class="rounded-circle d-inline-flex align-items-center justify-content-center" style="width:48px;height:48px;background:rgba(5,150,105,0.12);"><i class="bi bi-shield-check fs-5" style="color:#059669;"></i></span></div><div class="text-muted small">当前没有被封锁的 IP</div><div class="text-muted" style="font-size:0.7rem;">所有 IP 均可正常登录</div></div>';
             return;
         }
         list.innerHTML = locked.map(l => `
-            <div class="d-flex justify-content-between align-items-center border-bottom py-1">
-                <div>
-                    <span class="badge bg-secondary me-1">${escapeHtml(l.ip)}</span>
-                    <span>用户 <strong>${escapeHtml(l.username)}</strong></span>
-                    <span class="text-muted ms-2">失败 ${l.count} 次 · 封锁于 ${l.since}</span>
-                    <span class="badge bg-danger ms-1">剩余 ${l.remaining_min} 分钟</span>
+            <div class="d-flex justify-content-between align-items-center py-2 px-2 mb-1 rounded" style="background:rgba(99,102,241,0.03);border:1px solid rgba(99,102,241,0.06);">
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <code style="background:rgba(99,102,241,0.08);color:var(--primary);padding:2px 8px;border-radius:6px;font-size:0.8rem;">${escapeHtml(l.ip)}</code>
+                    <span class="small">用户 <strong>${escapeHtml(l.username)}</strong></span>
+                    <span class="small text-muted">失败 ${l.count} 次 · ${l.since}</span>
+                    <span class="badge" style="background:rgba(220,38,38,0.12);color:#DC2626;">剩余 ${l.remaining_min} 分钟</span>
                 </div>
-                <button class="btn btn-outline-success btn-sm py-0" onclick="unlockIp('${escapeHtml(l.ip)}')">
+                <button class="btn btn-sm" style="background:rgba(5,150,105,0.1);color:#059669;border:none;" onclick="unlockIp('${escapeHtml(l.ip)}')">
                     <i class="bi bi-unlock"></i> 解锁
                 </button>
             </div>
         `).join('');
     } catch(e) {
-        list.innerHTML = '<div class="text-center py-1 text-danger">加载失败，请刷新重试</div>';
+        list.innerHTML = '<div class="text-center py-2 text-danger small"><i class="bi bi-exclamation-triangle"></i> 加载失败，请刷新重试</div>';
     }
 }
 

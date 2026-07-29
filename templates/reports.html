@@ -1,0 +1,277 @@
+{% extends "base.html" %}
+{% block title %}巡检导出 - 管控平台{% endblock %}
+{% block head %}
+<style>
+.export-card { transition: all 0.2s; cursor: pointer; border: 1px solid rgba(99,102,241,0.08); border-radius: 10px; background: rgba(255,255,255,0.5); }
+.export-card:hover { border-color: var(--primary) !important; box-shadow: 0 2px 12px rgba(99,102,241,0.08); }
+.cat-check { display: none; }
+.cat-check:checked + .export-card { border-color: var(--primary) !important; background: rgba(99,102,241,0.08); box-shadow: 0 0 0 1px var(--primary); }
+.cat-check:checked + .export-card .check-icon { opacity: 1; color: var(--primary); }
+.check-icon { opacity: 0; transition: opacity 0.15s; font-size: 1.1rem; }
+.card-accent { border-left: 3px solid var(--primary); }
+#historyList .hist-item { transition: all 0.15s; border-radius: 8px; margin-bottom: 2px; }
+#historyList .hist-item:hover { background: rgba(99,102,241,0.04); }
+</style>
+{% endblock %}
+{% block content %}
+<h4 class="mb-1"><i class="bi bi-file-earmark-spreadsheet"></i> 巡检导出中心</h4>
+<p class="text-muted small mb-3">选择服务器和数据类别，导出 Excel 巡检报告</p>
+
+<div class="row g-3">
+    <!-- 左侧：导出配置 -->
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header"><strong><i class="bi bi-sliders"></i> 导出配置</strong></div>
+            <div class="card-body">
+                <!-- 选择服务器 -->
+                <div class="mb-3">
+                    <label class="form-label small fw-bold mb-2">选择服务器</label>
+                    <div class="d-flex gap-2 mb-2">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectAllServers(true)">全选</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectAllServers(false)">清空</button>
+                    </div>
+                    <div class="row g-2" id="serverList">
+                        {% for s in servers %}
+                        <div class="col-md-6">
+                            <input type="checkbox" class="cat-check srv-check" id="srv_{{ s.id }}" value="{{ s.id }}" data-db-type="{{ s.db_type or 'oscar' }}" checked onchange="onServerChange()">
+                            <label class="card export-card p-2" for="srv_{{ s.id }}" style="margin:0;">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <span class="small">{% if s.os_type=='windows' %}🪟{% else %}🐧{% endif %} <i class="bi bi-server"></i> {{ s.name or s.ssh_host }}</span>
+                                    <i class="bi bi-check-circle-fill check-icon"></i>
+                                </div>
+                            </label>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% if servers|length == 0 %}
+                    <div class="text-muted small">暂无服务器，请先在<a href="/servers">服务管理</a>中添加</div>
+                    {% endif %}
+                </div>
+
+                <!-- 选择数据类别 -->
+                <div class="mb-2">
+                    <label class="form-label small fw-bold mb-2">数据库采集项</label>
+                    <div class="d-flex gap-2 mb-2">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectAll('db', true)">全选</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectAll('db', false)">清空</button>
+                    </div>
+                    <div class="row g-2" id="dbCategories">
+                        {% for cat in categories %}
+                        <div class="col-md-6">
+                            <input type="checkbox" class="cat-check" id="db_{{ cat.id }}" value="{{ cat.id }}" checked data-group="db">
+                            <label class="card export-card p-2" for="db_{{ cat.id }}" style="margin:0;">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <span class="small"><i class="bi {{ cat.icon }}"></i> {{ cat.label }}</span>
+                                    <i class="bi bi-check-circle-fill check-icon"></i>
+                                </div>
+                            </label>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <div>
+                    <label class="form-label small fw-bold mb-2">系统检查项</label>
+                    <div class="d-flex gap-2 mb-2">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectAll('os', true)">全选</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectAll('os', false)">清空</button>
+                    </div>
+                    <div class="row g-2" id="osChecks">
+                        {% for chk in os_checks %}
+                        <div class="col-md-6">
+                            <input type="checkbox" class="cat-check" id="os_{{ chk.id }}" value="{{ chk.id }}" checked data-group="os">
+                            <label class="card export-card p-2" for="os_{{ chk.id }}" style="margin:0;">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <span class="small"><i class="bi {{ chk.icon }}"></i> {{ chk.label }}</span>
+                                    <i class="bi bi-check-circle-fill check-icon"></i>
+                                </div>
+                            </label>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <!-- 导出选项 -->
+                <div class="mt-3 pt-3 border-top">
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-5">
+                            <label class="form-label small">组织方式</label>
+                            <select class="form-select form-select-sm" id="organizeBy">
+                                <option value="server">按服务器分 Sheet</option>
+                                <option value="category">按类别分 Sheet</option>
+                            </select>
+                        </div>
+                        <div class="col-md-7 text-end">
+                            <button class="btn btn-primary" onclick="doExport()">
+                                <i class="bi bi-download"></i> 导出 Excel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 右侧：定时 + 历史 -->
+    <div class="col-lg-4">
+        <!-- 定时导出 -->
+        <div class="card card-accent mb-3">
+            <div class="card-header" style="background:rgba(99,102,241,0.04);"><strong><i class="bi bi-clock"></i> 定时导出</strong></div>
+            <div class="card-body">
+                <div class="form-check form-switch mb-2">
+                    <input class="form-check-input" type="checkbox" id="scheduleEnabled" {% if schedule.get('enabled') %}checked{% endif %} onchange="saveSchedule()">
+                    <label class="form-check-label small" for="scheduleEnabled">启用定时自动导出</label>
+                </div>
+                <div id="scheduleOptions" {% if not schedule.get('enabled') %}style="display:none;"{% endif %}>
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <label class="form-label small">频率</label>
+                            <select class="form-select form-select-sm" id="scheduleFreq" onchange="saveSchedule()">
+                                <option value="daily" {% if schedule.get('frequency')=='daily' %}selected{% endif %}>每天</option>
+                                <option value="weekly" {% if schedule.get('frequency')=='weekly' %}selected{% endif %}>每周一</option>
+                                <option value="monthly" {% if schedule.get('frequency')=='monthly' %}selected{% endif %}>每月1号</option>
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small">时间</label>
+                            <input type="time" class="form-control form-control-sm" id="scheduleTime" value="{{ schedule.get('time', '08:00') }}" onchange="saveSchedule()">
+                        </div>
+                    </div>
+                    <div class="mt-2">
+                        <label class="form-label small">保留份数</label>
+                        <input type="number" class="form-control form-control-sm" id="scheduleKeep" value="{{ schedule.get('keep', 30) }}" min="1" max="100" style="width:100px;" onchange="saveSchedule()">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 导出历史 -->
+        <div class="card card-accent">
+            <div class="card-header d-flex justify-content-between align-items-center" style="background:rgba(99,102,241,0.04);">
+                <strong><i class="bi bi-clock-history"></i> 导出历史</strong>
+                <button class="btn btn-sm btn-outline-secondary" onclick="loadHistory()" title="刷新">
+                    <i class="bi bi-arrow-clockwise"></i>
+                </button>
+            </div>
+            <div class="card-body p-1" style="max-height:360px;overflow-y:auto;">
+                <div id="historyList">
+                    <div class="text-center text-muted small py-3">加载中...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="progressOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;z-index:9999;background:rgba(15,23,42,0.5);backdrop-filter:blur(2px);">
+    <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--surface);border-radius:14px;padding:2rem 2.5rem;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,0.2);">
+        <div class="spinner-border text-primary mb-2" role="status"></div>
+        <div class="small">正在生成巡检报告...</div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+<script>
+function selectAllServers(checked){ document.querySelectorAll('.srv-check').forEach(function(cb){cb.checked=checked;}); onServerChange(); }
+function selectAll(group, checked){ document.querySelectorAll('input[data-group="'+group+'"]').forEach(function(cb){cb.checked=checked;}); }
+function getSelected(group){ return Array.from(document.querySelectorAll('input[data-group="'+group+'"]:checked')).map(function(cb){return cb.value;}); }
+function getSelectedServers(){ return Array.from(document.querySelectorAll('.srv-check:checked')).map(function(cb){return cb.value;}); }
+
+// ═══ 按服务器DB类型过滤分类 ═══
+var CAT_DB_MAP = {
+    basic_info: ['oscar','mysql','postgresql','oracle'],
+    db_info: ['oscar','mysql','postgresql','oracle'],
+    storage: ['oscar','mysql','postgresql','oracle'],
+    objects: ['oscar','mysql','postgresql','oracle'],
+    performance: ['oscar','mysql','postgresql','oracle'],
+};
+function onServerChange(){
+    var types = new Set();
+    document.querySelectorAll('.srv-check:checked').forEach(function(cb){ types.add(cb.dataset.dbType || 'oscar'); });
+    if(types.size === 0) return;
+    document.querySelectorAll('#dbCategories .cat-check').forEach(function(cb){
+        var cat = cb.value;
+        var allowed = CAT_DB_MAP[cat] || ['oscar','mysql','postgresql','oracle'];
+        var show = Array.from(types).some(function(t){ return allowed.indexOf(t) >= 0; });
+        cb.parentElement.style.display = show ? '' : 'none';
+    });
+}
+onServerChange();
+
+async function doExport(){
+    var servers = getSelectedServers();
+    var categories = getSelected('db');
+    var osChecks = getSelected('os');
+    var organizeBy = document.getElementById('organizeBy').value;
+    if(servers.length===0){ swalError('请选择至少一台服务器'); return; }
+    if(categories.length===0 && osChecks.length===0){ swalError('请选择至少一项导出内容'); return; }
+
+    var overlay = document.getElementById('progressOverlay');
+    overlay.style.display = '';
+    try {
+        var resp = await fetch('/api/export/xlsx', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({servers:servers, categories:categories, os_checks:osChecks, organize_by:organizeBy})
+        });
+        if(!resp.ok){ var err = await resp.json(); throw new Error(err.error||'导出失败'); }
+        var blob = await resp.blob();
+        var url = window.URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = decodeURIComponent(resp.headers.get('X-Filename') || '巡检报告.xlsx');
+        document.body.appendChild(a); a.click(); a.remove();
+        window.URL.revokeObjectURL(url);
+        swalSuccess('导出完成');
+        loadHistory();
+    }catch(e){ swalError(e.message); }
+    finally { overlay.style.display = 'none'; }
+}
+
+async function loadHistory(){
+    try {
+        var resp = await fetch('/api/export/history');
+        var history = await resp.json();
+        var c = document.getElementById('historyList');
+        if(history.length===0){ c.innerHTML='<div class="text-center text-muted small py-3">暂无导出记录</div>'; return; }
+        var htm = '';
+        for(var i=0;i<history.length;i++){
+            var h = history[i];
+            htm += '<div class="d-flex align-items-center px-2 py-2 border-bottom small" style="border-color:var(--border-solid)!important;">';
+            htm += '<div class="flex-grow-1 text-break"><div>📄 '+escapeHtml(h.filename)+'</div>';
+            htm += '<div class="text-muted" style="font-size:0.7rem;">'+h.time+' · '+h.server_count+'台服务器 · '+h.size_str+'</div></div>';
+            htm += '<a href="/api/export/xlsx-download/'+encodeURIComponent(h.filename)+'" class="btn btn-sm btn-outline-primary flex-shrink-0 ms-2" title="下载"><i class="bi bi-download"></i></a>';
+            htm += '<button class="btn btn-sm btn-outline-danger flex-shrink-0 ms-1" title="删除" onclick="deleteHistory(\''+escapeHtml(h.filename)+'\')"><i class="bi bi-trash"></i></button>';
+            htm += '</div>';
+        }
+        c.innerHTML = htm;
+    }catch(e){ document.getElementById('historyList').innerHTML='<div class="text-center text-danger small py-3">加载失败</div>'; }
+}
+
+async function deleteHistory(filename){
+    var ok = await swalConfirm('确定删除该报告？', '删除确认');
+    if(!ok) return;
+    try { await fetch('/api/export/history/'+encodeURIComponent(filename), {method:'DELETE'}); loadHistory(); }
+    catch(e){ swalError(e.message); }
+}
+
+var _st=null;
+function saveSchedule(){
+    clearTimeout(_st);
+    _st = setTimeout(async function(){
+        var enabled = document.getElementById('scheduleEnabled').checked;
+        document.getElementById('scheduleOptions').style.display = enabled?'':'none';
+        try {
+            await fetch('/api/export/schedule', {
+                method:'PUT',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({enabled:enabled, frequency:document.getElementById('scheduleFreq').value, time:document.getElementById('scheduleTime').value, keep:parseInt(document.getElementById('scheduleKeep').value)||30})
+            });
+        }catch(e){}
+    }, 500);
+}
+
+document.addEventListener('DOMContentLoaded', function(){ loadHistory(); });
+</script>
+{% endblock %}

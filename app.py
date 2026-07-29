@@ -6,9 +6,13 @@ import re
 import threading
 import time
 import traceback
+from datetime import datetime
 from functools import wraps
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session, Response
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session, Response, send_file
 
 from auth import check_login, change_password, add_user, update_user, delete_user, load_users as load_auth_users, has_permission, PERMISSIONS
 
@@ -26,6 +30,13 @@ app.config['SECRET_KEY'] = os.urandom(24).hex()
 app.config['JSON_AS_ASCII'] = False
 app.config['PERMANENT_SESSION_LIFETIME'] = 1800
 app.jinja_env.auto_reload = True
+
+
+@app.route('/favicon.ico')
+@app.route('/favicon.svg')
+def favicon():
+    return send_file(os.path.join(BASE_DIR, 'static', 'favicon.svg'), mimetype='image/svg+xml')
+
 
 scheduler = None
 _collect_executor = None
@@ -66,7 +77,7 @@ except Exception:
     pass
 
 from collector import collect_all, test_connection, db_control, app_control, QUERY_SETS, QUERY_LABELS, OS_CHECKS, OS_CHECK_LABELS
-from collector import _ssh_connect, _ssh_exec, _need_ssh, translate_error, SSH_ERROR_TRANSLATE, DB_ERROR_TRANSLATE, SSH_FIX_WIN, SSH_FIX_LINUX, strip_ansi, safe_decode
+from collector import _ssh_connect, _ssh_exec, _need_ssh, translate_error, SSH_ERROR_TRANSLATE, DB_ERROR_TRANSLATE, SSH_FIX_WIN, SSH_FIX_LINUX
 from persist import load_config, save_config, persist_os_error, persist_db_error, persist_slow_sql, cleanup_old_logs, query_logs
 from db_config import load_servers_from_db, save_server_to_db, delete_server_from_db
 CONFIG_FILE = os.path.join(DATA_DIR, 'servers.json')
@@ -181,31 +192,6 @@ def template_context():
     }
 
 
-@app.route('/api/reset-password', methods=['POST'])
-@login_required
-@permission_required('admin')
-def api_reset_password():
-    data = request.get_json(silent=True) or {}
-    username = data.get('username', '').strip()
-    password = data.get('password', '')
-    if not username or not password:
-        return jsonify({"ok": False, "msg": "用户名和密码不能为空"})
-    if len(password) < 4:
-        return jsonify({"ok": False, "msg": "新密码至少 4 位"})
-    if username == 'admin':
-        return jsonify({"ok": False, "msg": "admin 不支持此方式重置，请登录后修改"})
-    from auth import load_users, save_users, _hash
-    users = load_users()
-    user = next((u for u in users if u.get('username') == username), None)
-    if not user:
-        return jsonify({"ok": False, "msg": "用户不存在"})
-    if user.get('is_admin'):
-        return jsonify({"ok": False, "msg": "管理员不支持此方式重置，请登录后修改"})
-    user['password'] = _hash(password)
-    save_users(users)
-    return jsonify({"ok": True, "msg": "密码重置成功，请返回登录"})
-
-
 @app.before_request
 def refresh_session_user():
     if session.get('logged_in') and session.get('username'):
@@ -259,7 +245,8 @@ def login():
                     if now_ts - oldest < LOGIN_BAN_DURATION:
                         remaining = int((LOGIN_BAN_DURATION - (now_ts - oldest)) / 60) + 1
                         LOCKED_IPS[client_ip] = {'since': oldest, 'username': username or '?', 'count': len(attempts)}
-                        return render_template('login.html', error=f'登录失败次数过多，请 {remaining} 分钟后再试')
+                        session['login_error'] = f'登录失败次数过多，请 {remaining} 分钟后再试'
+                        return redirect(url_for('login'))
                     else:
                         attempts = []
                         LOCKED_IPS.pop(client_ip, None)
@@ -277,8 +264,12 @@ def login():
             return redirect(url_for('index'))
         with LOGIN_LOCK:
             LOGIN_ATTEMPTS.setdefault(client_ip, []).append(time.time())
-        return render_template('login.html', error='用户名或密码错误')
-    return render_template('login.html', error=None)
+        session['login_error'] = '用户名或密码错误'
+        return redirect(url_for('login'))
+
+    # GET 请求：从 session 取出错误信息（避免刷新时重复提交表单）
+    error = session.pop('login_error', None)
+    return render_template('login.html', error=error)
 
 
 @app.route('/logout')
@@ -399,7 +390,16 @@ def server_detail(server_id):
 def control_page():
     try:
         servers = load_servers()
-        return render_template('control.html', servers=servers, **template_context())
+        # 预计算应用分组
+        app_groups = {}
+        for s in servers:
+            for app in s.get('apps', []):
+                if app.get('in_control'):
+                    g = app.get('group', '其他应用') or '其他应用'
+                    if g not in app_groups:
+                        app_groups[g] = []
+                    app_groups[g].append({'server': s, 'app': app})
+        return render_template('control.html', servers=servers, app_groups=app_groups, **template_context())
     except Exception as e:
         return f"<pre>管控页渲染错误:\n{traceback.format_exc()}</pre>", 500
 
@@ -515,7 +515,7 @@ def api_update_server(server_id):
             for key in ['name', 'ssh_host', 'ssh_port', 'ssh_user', 'ssh_pass',
                         'db_host', 'db_port', 'db_user', 'db_pass', 'db_name',
                         'isql_cmd', 'enabled_categories', 'enabled_os_checks', 'auto_refresh',
-                        'svc_name', 'svc_mgr', 'os_type', 'in_control', 'apps',
+                        'svc_name', 'svc_mgr', 'os_type', 'db_type', 'in_control', 'apps',
                         'svc_start_cmd', 'svc_stop_cmd', 'persist_enabled']:
                 if key in data:
                     s[key] = data[key]
@@ -644,13 +644,6 @@ def api_app_control(server_id):
 @permission_required('admin')
 def config_page():
     return render_template('config.html', config=load_config(), **template_context())
-
-
-@app.route('/api/config', methods=['GET'])
-@login_required
-@permission_required('admin')
-def api_get_config():
-    return jsonify(load_config())
 
 
 @app.route('/api/config', methods=['PUT'])
@@ -1086,7 +1079,6 @@ def _do_persist(server, result):
 
 
 def _parse_elog_content(server_name, text):
-    import re
     blocks = text.split('===FILE:')
     for block in blocks:
         if not block.strip():
@@ -1135,6 +1127,522 @@ def _parse_elog_content(server_name, text):
 if scheduler is not None:
     scheduler.add_job(auto_collect_job, 'interval', seconds=30)
     scheduler.add_job(cleanup_old_logs, 'interval', hours=24)
+
+
+# ═══════════════════════════════════════════════
+#  巡检导出中心
+# ═══════════════════════════════════════════════
+REPORTS_DIR = os.path.join(DATA_DIR, 'reports')
+EXPORT_CATEGORIES = [
+    {'id': 'basic_info', 'label': '基础信息', 'icon': 'bi-info-circle'},
+    {'id': 'db_info', 'label': '数据库信息', 'icon': 'bi-database'},
+    {'id': 'storage', 'label': '存储空间', 'icon': 'bi-hdd'},
+    {'id': 'objects', 'label': '对象统计', 'icon': 'bi-grid'},
+    {'id': 'performance', 'label': '性能监控', 'icon': 'bi-graph-up'},
+    {'id': 'install_path', 'label': '安装路径', 'icon': 'bi-folder'},
+    {'id': 'db_log_errors', 'label': '数据库日志', 'icon': 'bi-file-earmark-text'},
+]
+EXPORT_OS_CHECKS = [
+    {'id': 'memory', 'label': '系统内存', 'icon': 'bi-memory'},
+    {'id': 'disk', 'label': '系统磁盘', 'icon': 'bi-hdd-stack'},
+    {'id': 'cpu', 'label': 'CPU负载', 'icon': 'bi-cpu'},
+    {'id': 'os_errors', 'label': '系统日志错误', 'icon': 'bi-exclamation-diamond'},
+]
+
+# ═══ 应用模板 ═══
+APP_TEMPLATES_FILE = os.path.join(DATA_DIR, 'app_templates.json')
+
+def load_app_templates():
+    if os.path.exists(APP_TEMPLATES_FILE):
+        with open(APP_TEMPLATES_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f).get('templates', {})
+    return {}
+
+@app.route('/api/app-templates')
+@login_required
+def api_app_templates():
+    return jsonify(load_app_templates())
+
+
+@app.route('/reports')
+@login_required
+def reports_page():
+    servers = load_servers()
+    cfg = load_config()
+    schedule_cfg = cfg.get('export_schedule', {})
+    return render_template('reports.html',
+                           servers=servers,
+                           categories=EXPORT_CATEGORIES,
+                           os_checks=EXPORT_OS_CHECKS,
+                           schedule=schedule_cfg,
+                           **template_context())
+
+
+@app.route('/api/export/sql-result', methods=['POST'])
+@login_required
+def api_export_sql_result():
+    """将 SQL 查询结果导出为 Excel"""
+    data = request.get_json(silent=True) or {}
+    columns = data.get('columns', [])
+    rows = data.get('rows', [])
+    if not columns:
+        return jsonify({"error": "无列信息"}), 400
+
+    try:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "SQL查询结果"
+        # 表头
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="6366F1", end_color="6366F1", fill_type="solid")
+        for ci, col in enumerate(columns, 1):
+            cell = ws.cell(row=1, column=ci, value=str(col))
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal='center')
+        # 数据行
+        for ri, row in enumerate(rows, 2):
+            for ci in range(len(columns)):
+                val = row[ci] if ci < len(row) else ''
+                ws.cell(row=ri, column=ci + 1, value=str(val) if val is not None else 'NULL')
+        # 调整列宽
+        for ci in range(1, len(columns) + 1):
+            ws.column_dimensions[get_column_letter(ci)].width = 18
+
+        report_dir = os.path.join(DATA_DIR, 'reports')
+        os.makedirs(report_dir, exist_ok=True)
+        filename = f"sql_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        filepath = os.path.join(report_dir, filename)
+        wb.save(filepath)
+        return jsonify({"status": "ok", "filename": filename})
+    except Exception as e:
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
+
+
+@app.route('/api/export/xlsx', methods=['POST'])
+@login_required
+def api_export_xlsx():
+    data = request.get_json(silent=True) or {}
+    server_ids = data.get('servers', [])
+    categories = data.get('categories', [])
+    os_checks = data.get('os_checks', [])
+    organize_by = data.get('organize_by', 'server')  # 'server' or 'category'
+
+    if not server_ids:
+        return jsonify({"error": "请选择至少一台服务器"}), 400
+    if not categories and not os_checks:
+        return jsonify({"error": "请选择至少一项导出内容"}), 400
+
+    servers = [s for s in load_servers() if s.get('id') in server_ids]
+    if not servers:
+        return jsonify({"error": "未找到所选服务器"}), 404
+
+    try:
+        wb = Workbook()
+        wb.remove(wb.active)
+
+        header_font = Font(name='Microsoft YaHei', bold=True, size=11, color='FFFFFF')
+        header_fill = PatternFill(start_color='6366F1', end_color='6366F1', fill_type='solid')
+        section_font = Font(name='Microsoft YaHei', bold=True, size=12, color='4F46E5')
+        thin_border = Border(
+            left=Side(style='thin', color='D4D4D8'),
+            right=Side(style='thin', color='D4D4D8'),
+            top=Side(style='thin', color='D4D4D8'),
+            bottom=Side(style='thin', color='D4D4D8'),
+        )
+        wrap_align = Alignment(wrap_text=True, vertical='top')
+
+        if organize_by == 'server':
+            for server in servers:
+                _fill_server_sheet(wb, server, categories, os_checks,
+                                   header_font, header_fill, section_font, thin_border, wrap_align)
+            # 汇总 Sheet
+            _fill_summary_sheet(wb, servers, categories, os_checks,
+                                header_font, header_fill, section_font, thin_border)
+        else:
+            # 按类别组织
+            for cat in categories:
+                if cat in QUERY_SETS:
+                    ws = wb.create_sheet(title=QUERY_SETS[cat]['label'][:31])
+                    _fill_category_sheet(ws, servers, cat, 'db',
+                                         header_font, header_fill, section_font, thin_border, wrap_align)
+            for chk in os_checks:
+                if chk in OS_CHECK_LABELS:
+                    ws = wb.create_sheet(title=OS_CHECK_LABELS[chk][:31])
+                    _fill_category_sheet(ws, servers, chk, 'os',
+                                         header_font, header_fill, section_font, thin_border, wrap_align)
+
+        # 保存文件
+        os.makedirs(REPORTS_DIR, exist_ok=True)
+        ts = time.strftime('%Y%m%d_%H%M%S')
+        filename = f'巡检报告_{ts}.xlsx'
+        filepath = os.path.join(REPORTS_DIR, filename)
+        wb.save(filepath)
+
+        # 记录历史
+        _add_export_history(filename, len(servers), len(categories) + len(os_checks))
+
+        resp = send_file(filepath, as_attachment=True, download_name=filename,
+                         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        from urllib.parse import quote
+        resp.headers['X-Filename'] = quote(filename, safe='')
+        return resp
+
+    except Exception as e:
+        return jsonify({"error": f"导出失败: {str(e)}"}), 500
+
+
+def _fill_server_sheet(wb, server, categories, os_checks, hf, hfill, sf, border, align):
+    name = server.get('name') or server.get('ssh_host', '')
+    sheet_name = (name[:28] + '..') if len(name) > 31 else name
+    sheet_name = sheet_name[:31]
+    ws = wb.create_sheet(title=sheet_name)
+
+    sid = server.get('id')
+    with CACHE_LOCK:
+        cached = CACHE.get(sid, {}).get('data')
+
+    row = 1
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=8)
+    cell = ws.cell(row=row, column=1, value=f'📊 巡检报告 — {name}')
+    cell.font = Font(name='Microsoft YaHei', bold=True, size=14, color='4F46E5')
+    row += 1
+    ws.cell(row=row, column=1, value=f'采集时间: {cached.get("timestamp", "暂无数据") if cached else "暂无数据"}').font = Font(color='64748B', size=10)
+    row += 2
+
+    if not cached:
+        ws.cell(row=row, column=1, value='暂无采集数据，请先执行采集').font = Font(color='DC2626', size=11)
+        _auto_width(ws)
+        return
+
+    os_info = cached.get('os_info', {})
+    db_queries = cached.get('db_queries', {})
+
+    for chk in os_checks:
+        if chk in os_info and chk in OS_CHECK_LABELS:
+            row = _write_section_header(ws, row, f'🖥 {OS_CHECK_LABELS[chk]}', sf)
+            row = _write_check_result(ws, row, os_info[chk], hf, hfill, border, align)
+            row += 1
+
+    for cat in categories:
+        # 先查 db_queries（数据库采集），再查 os_info（系统采集但归入数据库分类的项）
+        if cat in db_queries and cat in QUERY_SETS:
+            row = _write_section_header(ws, row, f'📋 {QUERY_SETS[cat]["label"]}', sf)
+            for qname, qresult in db_queries[cat].items():
+                label = QUERY_LABELS.get(qname, qname)
+                row = _write_section_header(ws, row, label, Font(name='Microsoft YaHei', bold=True, size=10, color='6366F1'))
+                row = _write_query_result(ws, row, qresult, hf, hfill, border, align)
+                row += 1
+        elif cat in os_info and cat in OS_CHECK_LABELS:
+            row = _write_section_header(ws, row, f'📋 {OS_CHECK_LABELS[cat]}', sf)
+            row = _write_check_result(ws, row, os_info[cat], hf, hfill, border, align)
+            row += 1
+
+    _auto_width(ws)
+
+
+def _fill_category_sheet(ws, servers, key, stype, hf, hfill, sf, border, align):
+    row = 1
+    label = QUERY_SETS[key]['label'] if stype == 'db' else OS_CHECK_LABELS.get(key, key)
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=8)
+    ws.cell(row=row, column=1, value=f'📊 {label}').font = Font(name='Microsoft YaHei', bold=True, size=14, color='4F46E5')
+    row += 2
+
+    for server in servers:
+        name = server.get('name') or server.get('ssh_host', '')
+        sid = server.get('id')
+        with CACHE_LOCK:
+            cached = CACHE.get(sid, {}).get('data')
+        row = _write_section_header(ws, row, f'🖥 {name}', sf)
+        if not cached:
+            ws.cell(row=row, column=1, value='暂无数据').font = Font(color='DC2626', size=10)
+            row += 2
+            continue
+
+        if stype == 'os':
+            chk_data = cached.get('os_info', {}).get(key)
+            if chk_data:
+                row = _write_check_result(ws, row, chk_data, hf, hfill, border, align)
+            else:
+                ws.cell(row=row, column=1, value='(未采集)').font = Font(color='94A3B8', size=10)
+                row += 1
+        else:
+            # 数据库类别：先查 db_queries，再查 os_info
+            if key in cached.get('db_queries', {}):
+                cat_data = cached['db_queries'][key]
+                for qname, qresult in cat_data.items():
+                    qlabel = QUERY_LABELS.get(qname, qname)
+                    ws.cell(row=row, column=1, value=qlabel).font = Font(name='Microsoft YaHei', bold=True, size=10, color='6366F1')
+                    row += 1
+                    row = _write_query_result(ws, row, qresult, hf, hfill, border, align)
+            elif key in cached.get('os_info', {}):
+                chk_data = cached['os_info'][key]
+                row = _write_check_result(ws, row, chk_data, hf, hfill, border, align)
+            else:
+                ws.cell(row=row, column=1, value='(未采集)').font = Font(color='94A3B8', size=10)
+                row += 1
+        row += 1
+    _auto_width(ws)
+
+
+def _fill_summary_sheet(wb, servers, categories, os_checks, hf, hfill, sf, border):
+    ws = wb.create_sheet(title='汇总概览')
+    row = 1
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=6)
+    ws.cell(row=row, column=1, value='📊 巡检汇总报告').font = Font(name='Microsoft YaHei', bold=True, size=14, color='4F46E5')
+    row += 1
+    ws.cell(row=row, column=1, value=f'导出时间: {time.strftime("%Y-%m-%d %H:%M:%S")}').font = Font(color='64748B', size=10)
+    row += 2
+
+    # 服务器总览
+    headers = ['服务器', '采集时间', '在线状态', '连接数', '死锁数', '慢SQL数']
+    for ci, h in enumerate(headers, 1):
+        cell = ws.cell(row=row, column=ci, value=h)
+        cell.font = hf; cell.fill = hfill; cell.border = border
+    row += 1
+
+    for server in servers:
+        name = server.get('name') or server.get('ssh_host', '')
+        sid = server.get('id')
+        with CACHE_LOCK:
+            cached = CACHE.get(sid, {}).get('data')
+        ts = cached.get('timestamp', '-') if cached else '-'
+
+        sessions = '-'
+        deadlocks = '-'
+        slow_count = '-'
+        if cached:
+            perf = cached.get('db_queries', {}).get('performance', {})
+            sc = perf.get('session_count', {}).get('rows')
+            if sc and sc[0]:
+                sessions = str(sc[0][0])
+            dl = perf.get('deadlock_count', {}).get('rows')
+            if dl and dl[0]:
+                deadlocks = str(dl[0][0])
+            sl = perf.get('slow_sql', {}).get('rows', [])
+            slow_count = str(len(sl))
+
+        vals = [name, ts, '在线' if cached else '未采集', sessions, deadlocks, slow_count]
+        for ci, v in enumerate(vals, 1):
+            cell = ws.cell(row=row, column=ci, value=v)
+            cell.border = border; cell.alignment = Alignment(vertical='top')
+        row += 1
+
+    row += 1
+    ws.cell(row=row, column=1, value=f'导出内容: 数据库类别 {len(categories)} 项, 系统检查 {len(os_checks)} 项').font = Font(color='94A3B8', size=9)
+    _auto_width(ws)
+
+
+def _write_section_header(ws, row, text, font):
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=8)
+    ws.cell(row=row, column=1, value=text).font = font
+    return row + 1
+
+
+def _write_query_result(ws, row, qr, hf, hfill, border, align):
+    if not qr or not qr.get('columns'):
+        ws.cell(row=row, column=1, value='(无数据)').font = Font(color='94A3B8', size=10)
+        return row + 1
+    for ci, col in enumerate(qr['columns'], 1):
+        cell = ws.cell(row=row, column=ci, value=str(col))
+        cell.font = hf; cell.fill = hfill; cell.border = border
+    row += 1
+    for r_data in (qr.get('rows') or []):
+        for ci, val in enumerate(r_data, 1):
+            cell = ws.cell(row=row, column=ci, value=str(val) if val is not None else '')
+            cell.border = border; cell.alignment = align
+        row += 1
+    return row
+
+
+def _write_check_result(ws, row, cr, hf, hfill, border, align):
+    if cr.get('columns') and cr.get('rows'):
+        return _write_query_result(ws, row, cr, hf, hfill, border, align)
+    output = cr.get('output', '')
+    if output:
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=8)
+        cell = ws.cell(row=row, column=1, value=output[:3000])
+        cell.font = Font(name='Consolas', size=9, color='334155')
+        cell.alignment = Alignment(wrap_text=True)
+        return row + 1
+    ws.cell(row=row, column=1, value='(无数据)').font = Font(color='94A3B8', size=10)
+    return row + 1
+
+
+def _auto_width(ws):
+    for col in ws.columns:
+        max_len = 0
+        col_letter = get_column_letter(col[0].column)
+        for cell in col:
+            if cell.value:
+                max_len = max(max_len, len(str(cell.value)))
+        ws.column_dimensions[col_letter].width = min(max_len + 4, 50)
+
+
+def _add_export_history(filename, server_count, item_count):
+    history_file = os.path.join(REPORTS_DIR, 'history.json')
+    history = []
+    if os.path.exists(history_file):
+        try:
+            with open(history_file, 'r', encoding='utf-8') as f:
+                history = json.load(f)
+        except Exception:
+            history = []
+    history.insert(0, {
+        'filename': filename,
+        'server_count': server_count,
+        'item_count': item_count,
+        'time': time.strftime('%Y-%m-%d %H:%M:%S'),
+        'size': os.path.getsize(os.path.join(REPORTS_DIR, filename)),
+    })
+    # 最多保留 100 条历史
+    if len(history) > 100:
+        old = history.pop()
+        old_path = os.path.join(REPORTS_DIR, old['filename'])
+        if os.path.exists(old_path):
+            os.remove(old_path)
+    with open(history_file, 'w', encoding='utf-8') as f:
+        json.dump(history, f, ensure_ascii=False, indent=2)
+
+
+@app.route('/api/export/history', methods=['GET'])
+@login_required
+def api_export_history():
+    history_file = os.path.join(REPORTS_DIR, 'history.json')
+    if not os.path.exists(history_file):
+        return jsonify([])
+    with open(history_file, 'r', encoding='utf-8') as f:
+        history = json.load(f)
+    for h in history:
+        h['size_str'] = _format_size(h.get('size', 0))
+    return jsonify(history)
+
+
+@app.route('/api/export/history/<filename>', methods=['DELETE'])
+@login_required
+def api_delete_export_history(filename):
+    filepath = os.path.join(REPORTS_DIR, filename)
+    if os.path.exists(filepath):
+        os.remove(filepath)
+    history_file = os.path.join(REPORTS_DIR, 'history.json')
+    if os.path.exists(history_file):
+        with open(history_file, 'r', encoding='utf-8') as f:
+            history = json.load(f)
+        history = [h for h in history if h.get('filename') != filename]
+        with open(history_file, 'w', encoding='utf-8') as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+    return jsonify({"status": "ok"})
+
+
+@app.route('/api/export/xlsx-download/<path:filename>')
+@app.route('/api/export/download/<path:filename>')
+@login_required
+def api_download_export(filename):
+    filepath = os.path.join(REPORTS_DIR, filename)
+    if not os.path.exists(filepath):
+        return jsonify({"error": "文件不存在"}), 404
+    return send_file(filepath, as_attachment=True, download_name=filename,
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+@app.route('/api/export/schedule', methods=['GET', 'PUT'])
+@login_required
+def api_export_schedule():
+    if request.method == 'GET':
+        cfg = load_config()
+        return jsonify(cfg.get('export_schedule', {}))
+
+    data = request.get_json(silent=True) or {}
+    cfg = load_config()
+    cfg['export_schedule'] = {
+        'enabled': data.get('enabled', False),
+        'frequency': data.get('frequency', 'daily'),  # daily / weekly / monthly
+        'time': data.get('time', '08:00'),
+        'keep': data.get('keep', 30),
+    }
+    save_config(cfg)
+
+    # 更新定时任务
+    if scheduler is not None:
+        for job in scheduler.get_jobs():
+            if job.id == 'auto_export':
+                job.remove()
+        if cfg['export_schedule'].get('enabled'):
+            freq = cfg['export_schedule'].get('frequency', 'daily')
+            time_str = cfg['export_schedule'].get('time', '08:00')
+            hour, minute = map(int, time_str.split(':'))
+            if freq == 'daily':
+                scheduler.add_job(_auto_export_job, 'cron', hour=hour, minute=minute, id='auto_export')
+            elif freq == 'weekly':
+                scheduler.add_job(_auto_export_job, 'cron', day_of_week='mon', hour=hour, minute=minute, id='auto_export')
+            elif freq == 'monthly':
+                scheduler.add_job(_auto_export_job, 'cron', day=1, hour=hour, minute=minute, id='auto_export')
+
+    return jsonify({"status": "ok"})
+
+
+def _auto_export_job():
+    """定时导出任务：导出所有服务器的全部数据"""
+    servers = load_servers()
+    if not servers:
+        return
+    try:
+        wb = Workbook()
+        wb.remove(wb.active)
+        hf = Font(name='Microsoft YaHei', bold=True, size=11, color='FFFFFF')
+        hfill = PatternFill(start_color='6366F1', end_color='6366F1', fill_type='solid')
+        sf = Font(name='Microsoft YaHei', bold=True, size=12, color='4F46E5')
+        border = Border(
+            left=Side(style='thin', color='D4D4D8'),
+            right=Side(style='thin', color='D4D4D8'),
+            top=Side(style='thin', color='D4D4D8'),
+            bottom=Side(style='thin', color='D4D4D8'),
+        )
+        align = Alignment(wrap_text=True, vertical='top')
+        all_cats = list(QUERY_SETS.keys())
+        all_os = list(OS_CHECKS.keys())
+
+        for server in servers:
+            _fill_server_sheet(wb, server, all_cats, all_os, hf, hfill, sf, border, align)
+        _fill_summary_sheet(wb, servers, all_cats, all_os, hf, hfill, sf, border)
+
+        os.makedirs(REPORTS_DIR, exist_ok=True)
+        ts = time.strftime('%Y%m%d_%H%M%S')
+        filename = f'巡检报告_自动_{ts}.xlsx'
+        filepath = os.path.join(REPORTS_DIR, filename)
+        wb.save(filepath)
+        _add_export_history(filename, len(servers), len(all_cats) + len(all_os))
+
+        # 清理旧报告
+        cfg = load_config()
+        keep = cfg.get('export_schedule', {}).get('keep', 30)
+        _cleanup_old_reports(keep)
+    except Exception:
+        pass
+
+
+def _cleanup_old_reports(keep):
+    history_file = os.path.join(REPORTS_DIR, 'history.json')
+    if not os.path.exists(history_file):
+        return
+    with open(history_file, 'r', encoding='utf-8') as f:
+        history = json.load(f)
+    while len(history) > keep:
+        old = history.pop()
+        old_path = os.path.join(REPORTS_DIR, old['filename'])
+        if os.path.exists(old_path):
+            os.remove(old_path)
+    with open(history_file, 'w', encoding='utf-8') as f:
+        json.dump(history, f, ensure_ascii=False, indent=2)
+
+
+def _format_size(size_bytes):
+    if size_bytes < 1024:
+        return f'{size_bytes} B'
+    elif size_bytes < 1024 * 1024:
+        return f'{size_bytes / 1024:.1f} KB'
+    else:
+        return f'{size_bytes / (1024 * 1024):.1f} MB'
 
 
 if __name__ == '__main__':
