@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4f46e5"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#bg)"/>
+  <!-- 数据库圆柱 -->
+  <ellipse cx="32" cy="18" rx="18" ry="7" fill="#e2e8f0"/>
+  <path d="M14 18 v13 a18 7 0 0 0 36 0 V18" fill="#cbd5e1"/>
+  <ellipse cx="32" cy="31" rx="18" ry="7" fill="#e2e8f0"/>
+  <path d="M14 31 v13 a18 7 0 0 0 36 0 V31" fill="#94a3b8"/>
+  <ellipse cx="32" cy="44" rx="18" ry="7" fill="#e2e8f0"/>
+  <!-- 脉冲线 -->
+  <path d="M14 22 h6 l4 6 4-10 5 12 4-8 4 6 h9" fill="none" stroke="#22c55e" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="46" cy="28" r="2.6" fill="#22c55e"/>
+</svg>

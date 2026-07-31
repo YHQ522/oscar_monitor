@@ -12,6 +12,7 @@ build/
 .venv/
 venv/
 env/
+.venv_test/
 
 # IDE
 .idea/
@@ -25,6 +26,18 @@ Thumbs.db
 data/config.json
 data/servers.json
 data/users.json
+data/oscar.db
+data/secret_key
+data/reports/*.xlsx
 
 # Logs
 *.log
+
+# Node
+node_modules/
+frontend/dist/
+.pytest_cache/
+.ruff_cache/
+
+# Environment
+.env
