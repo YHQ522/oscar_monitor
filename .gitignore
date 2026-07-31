@@ -36,6 +36,7 @@ data/reports/*.xlsx
 # Node
 node_modules/
 frontend/dist/
+frontend/.vite/
 .pytest_cache/
 .ruff_cache/
 
