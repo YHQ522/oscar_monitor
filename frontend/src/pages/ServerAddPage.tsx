@@ -1,9 +1,10 @@
 // 添加/编辑服务器
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Form, Input, InputNumber, Select, Button, Card, Row, Col, Space, Checkbox, Divider, Steps, Switch, Tag, Modal, Descriptions, Radio, Alert,
 } from 'antd'
 import { App as AntApp } from 'antd'
+import { ApiOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import type { Server, QuerySetMeta } from '../api/types'
@@ -13,6 +14,7 @@ interface Meta {
   query_sets: Record<string, Record<string, QuerySetMeta>>
   os_check_labels: Record<string, string>
   os_checks: string[]
+  log_enabled?: boolean
 }
 
 // 依赖数据库的系统检查项：仅系统模式（skip_db）下应排除
@@ -39,9 +41,14 @@ export default function ServerAddPage() {
   const [apps, setApps] = useState<any[]>([])
   const [dbType, setDbType] = useState('oscar')
   const [collectMode, setCollectMode] = useState<'os' | 'both' | 'db'>('both')
+  // 系统级日志持久化开关（meta 返回；未开启时禁用服务器级开关并提示）
+  const [logEnabled, setLogEnabled] = useState(true)
+  // 防 StrictMode 双执行导致重复弹出提示
+  const warnedRef = useRef(false)
   const [currentStep, setCurrentStep] = useState(0)
   const [saving, setSaving] = useState(false)
   const [testLoading, setTestLoading] = useState(false)
+  const [sshTestLoading, setSshTestLoading] = useState(false)
   const [testOpen, setTestOpen] = useState(false)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [testResult, setTestResult] = useState<any>(null)
@@ -50,6 +57,12 @@ export default function ServerAddPage() {
     api.get<Meta>('/api/meta')
       .then((m) => {
         setMeta(m)
+        // 系统级日志持久化开关：未开启时禁用服务器级开关并直接提示
+        setLogEnabled(m.log_enabled !== false)
+        if (m.log_enabled === false && !warnedRef.current) {
+          warnedRef.current = true
+          message.warning('全局日志持久化未开启，服务器「日志持久化」开关已禁用，请先在系统配置中开启')
+        }
         // 非编辑模式：初始化采集项为默认「系统+数据库」（后端不再自动填充空列表）
         if (!editId) {
           const allCats = Object.keys(m.query_sets['oscar'] || {})
@@ -119,6 +132,8 @@ export default function ServerAddPage() {
     } else {
       form.setFieldsValue({ enabled_categories: allCats, enabled_os_checks: allOs })
     }
+    // 模式切换后按新规则重新校验（清除旧错误 / 校验新必填）
+    form.validateFields().catch(() => { })
   }
 
   const testConnection = async () => {
@@ -144,6 +159,25 @@ export default function ServerAddPage() {
     }
   }
 
+  // 第 1 步：仅测试 SSH 连接（skip_db=true 跳过数据库）
+  const testSsh = async () => {
+    try {
+      const values = await form.validateFields(['ssh_host', 'ssh_port', 'ssh_user', 'ssh_pass', 'os_type'])
+      setSshTestLoading(true)
+      const result = await api.post<{ ssh: { ok: boolean; msg: string } }>(
+        '/api/test-connection',
+        { ...values, skip_db: true },
+      )
+      if (result.ssh) {
+        result.ssh.ok ? message.success(`SSH：${result.ssh.msg}`) : message.error(`SSH：${result.ssh.msg}`)
+      }
+    } catch (e) {
+      message.error((e as Error).message || '请先填写 SSH 配置')
+    } finally {
+      setSshTestLoading(false)
+    }
+  }
+
   const next = async () => {
     // 仅系统模式：数据库连接步骤无需填写，直接跳过
     if (currentStep === 2 && collectMode === 'os') {
@@ -153,8 +187,9 @@ export default function ServerAddPage() {
     try {
       await form.validateFields(STEP_FIELDS[currentStep])
       setCurrentStep(currentStep + 1)
-    } catch {
-      /* 校验失败，antd 已在表单内展示错误 */
+    } catch (err) {
+      // 校验失败：光标自动跳到第一个未填写的必填字段
+      focusFirstError(err)
     }
   }
 
@@ -163,6 +198,27 @@ export default function ServerAddPage() {
     try {
       const values = await form.validateFields()
       const payload = { ...values, apps, skip_db: collectMode === 'os' }
+      // 系统未开启日志持久化时，强制关闭服务器级开关（避免确认页与实际不符）
+      if (!logEnabled) payload.persist_enabled = false
+      // 提交前连接校验：SSH 不通 → 阻止保存；DB 不通 → 警告但仍保存
+      // （编辑模式密码留空=不修改，无法校验则跳过）
+      const sshPassProvided = editId ? !!values.ssh_pass : true
+      const dbPassProvided = editId ? !!values.db_pass : true
+      if (sshPassProvided || dbPassProvided) {
+        const test = await api
+          .post<{ ssh?: { ok: boolean; msg: string }; db?: { ok: boolean; msg: string } }>('/api/test-connection', payload)
+          .catch(() => null)
+        if (test) {
+          if (test.ssh && !test.ssh.ok && sshPassProvided) {
+            message.error(`SSH 连接校验未通过：${test.ssh.msg}（已阻止保存）`)
+            setSaving(false)
+            return
+          }
+          if (test.db && !test.db.ok && !payload.skip_db && dbPassProvided) {
+            message.warning(`数据库连接校验未通过：${test.db.msg}（仍将保存配置）`)
+          }
+        }
+      }
       if (editId) {
         await api.put(`/api/servers/${editId}`, payload)
         message.success('保存成功')
@@ -172,7 +228,9 @@ export default function ServerAddPage() {
       }
       navigate('/servers')
     } catch (e) {
-      message.error((e as Error).message)
+      // 校验失败：光标自动跳到第一个未填写的必填字段
+      focusFirstError(e)
+      message.error('请先填写必填项')
     } finally {
       setSaving(false)
     }
@@ -195,6 +253,49 @@ export default function ServerAddPage() {
   const querySets = meta?.query_sets[dbType] || {}
   const osCheckLabels = meta?.os_check_labels || {}
 
+  // 响应式监听表单值（确认页展示用）：
+  // 避免在 render 阶段调用 form.getFieldValue()——那既非响应式（确认页显示过期数据），
+  // 又会在 Form 挂载前触发 rc-field-form 的 useForm 未连接警告
+  const wName = Form.useWatch('name', form)
+  const wOsType = Form.useWatch('os_type', form)
+  const wDbType = Form.useWatch('db_type', form)
+  const wSshHost = Form.useWatch('ssh_host', form)
+  const wSshPort = Form.useWatch('ssh_port', form)
+  const wDbHost = Form.useWatch('db_host', form)
+  const wDbPort = Form.useWatch('db_port', form)
+  const wInControl = Form.useWatch('in_control', form)
+  const wPersist = Form.useWatch('persist_enabled', form)
+  const wCategories = Form.useWatch('enabled_categories', form)
+  const wOsChecks = Form.useWatch('enabled_os_checks', form)
+  const OS_LABELS: Record<string, string> = { linux: 'Linux', windows: 'Windows' }
+
+  // 条件必填校验：cond 为 true 时必填，否则放行（用于采集模式/开关联动的字段）
+  const requireIf = (cond: boolean, message = '必填') => ({
+    validator: (_: unknown, value: unknown) =>
+      cond && (value === undefined || value === null || value === '')
+        ? Promise.reject(new Error(message))
+        : Promise.resolve(),
+  })
+  // SSH 本地判断：为空 / 127.0.0.1 / localhost 视为本地（无需 SSH 密码）
+  const isLocalSsh = !wSshHost || wSshHost === '127.0.0.1' || wSshHost === 'localhost'
+
+  // 校验失败时，光标自动跳到第一个未填写的必填字段
+  const focusFirstError = (err: unknown) => {
+    const errorFields = (err as { errorFields?: { name: (string | number)[] }[] }).errorFields
+    if (!errorFields || errorFields.length === 0) return
+    const name = String(errorFields[0].name[0])
+    const el = document.getElementById(name)
+    if (!el) return
+    // Select/Checkbox.Group 等容器取其内部可聚焦控件
+    const focusable = (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el.tagName === 'BUTTON')
+      ? el
+      : (el.querySelector('input, textarea') || el)
+    if (focusable && typeof (focusable as HTMLElement).focus === 'function') {
+      ;(focusable as HTMLElement).focus()
+    }
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }
+
   // 服务管理器监听：联动显示是否需要填写自定义命令
   const svcMgr = Form.useWatch('svc_mgr', form)
   const svcMgrHelp = (() => {
@@ -210,8 +311,18 @@ export default function ServerAddPage() {
 
   return (
     <Card title={editId ? '编辑服务器' : '添加服务器'} style={{ overflowX: 'hidden' }}>
-      <Form form={form} layout="vertical" initialValues={{
+      <Form
+        form={form}
+        layout="vertical"
+        onValuesChange={(changed) => {
+          // 服务管理器/管控开关/SSH 主机变化时，重新校验联动必填字段
+          if ('svc_mgr' in changed) form.validateFields(['svc_start_cmd', 'svc_stop_cmd']).catch(() => { })
+          if ('in_control' in changed) form.validateFields(['svc_name']).catch(() => { })
+          if ('ssh_host' in changed) form.validateFields(['ssh_pass']).catch(() => { })
+        }}
+        initialValues={{
         ssh_port: 22,
+        ssh_user: 'root',
         db_port: 2003,
         db_user: 'SYSDBA',
         db_name: 'OSRDB',
@@ -242,26 +353,45 @@ export default function ServerAddPage() {
               </Col>
               <Col xs={24} sm={12} md={8}>
                 <Form.Item name="os_type" label="操作系统">
-                  <Select options={[{ value: 'linux', label: 'Linux' }, { value: 'windows', label: 'Windows' }]} />
+                  <Select
+                    options={[{ value: 'linux', label: 'Linux' }, { value: 'windows', label: 'Windows' }]}
+                    onChange={(v: string) => {
+                      // 选择操作系统时自动补全 SSH 默认用户：
+                      // 当前值为空或仍是另一系统的默认值（自动补全残留）→ 切换为新系统默认；
+                      // 用户手动输入过 → 保留
+                      const def: Record<string, string> = { linux: 'root', windows: 'Administrator' }
+                      const cur = form.getFieldValue('ssh_user')
+                      const other = v === 'windows' ? 'root' : 'Administrator'
+                      if (!cur || cur === other) {
+                        form.setFieldsValue({ ssh_user: def[v] })
+                      }
+                    }}
+                  />
                 </Form.Item>
               </Col>
               <Col xs={24} sm={12} md={8}>
-                <Form.Item name="ssh_host" label="SSH 主机">
+                <Form.Item name="ssh_host" label="SSH 主机" rules={[{ required: true, message: '必填' }]}>
                   <Input placeholder="127.0.0.1 表示本地" />
                 </Form.Item>
               </Col>
               <Col xs={8} sm={6} md={4}>
-                <Form.Item name="ssh_port" label="SSH 端口">
+                <Form.Item name="ssh_port" label="SSH 端口" rules={[{ required: true, message: '必填' }]}>
                   <InputNumber min={1} max={65535} style={{ width: '100%' }} />
                 </Form.Item>
               </Col>
               <Col xs={8} sm={6} md={6}>
-                <Form.Item name="ssh_user" label="SSH 用户">
+                <Form.Item name="ssh_user" label="SSH 用户" rules={[{ required: true, message: '必填' }]}>
                   <Input />
                 </Form.Item>
               </Col>
               <Col xs={8} sm={6} md={6}>
-                <Form.Item name="ssh_pass" label="SSH 密码" extra={editId ? '留空表示不修改' : undefined}>
+                <Form.Item
+                  name="ssh_pass"
+                  label="SSH 密码"
+                  extra={editId ? '留空表示不修改' : (isLocalSsh ? '本地无需密码' : undefined)}
+                  rules={[requireIf(!editId && !isLocalSsh)]}
+                  required={!editId && !isLocalSsh}
+                >
                   <Input.Password placeholder={editId ? '（已保存）' : ''} />
                 </Form.Item>
               </Col>
@@ -271,6 +401,11 @@ export default function ServerAddPage() {
                 </Form.Item>
               </Col>
             </Row>
+            <Space style={{ marginTop: 8 }}>
+              <Button icon={<ApiOutlined />} onClick={testSsh} loading={sshTestLoading}>
+                测试 SSH 连接
+              </Button>
+            </Space>
           </div>
 
           <div style={{ display: currentStep === 1 ? 'block' : 'none' }}>
@@ -291,7 +426,17 @@ export default function ServerAddPage() {
               </Form.Item>
               <Row gutter={[24, 8]}>
                 <Col xs={24} md={12}>
-                  <Form.Item name="enabled_categories" label="数据库采集类别">
+                  <Form.Item
+                    name="enabled_categories"
+                    label="数据库采集类别"
+                    required={collectMode !== 'os'}
+                    rules={[{
+                      validator: (_, value: string[]) =>
+                        collectMode !== 'os' && !(value && value.length > 0)
+                          ? Promise.reject(new Error('至少选择一项'))
+                          : Promise.resolve(),
+                    }]}
+                  >
                     <Checkbox.Group
                       options={Object.entries(querySets).map(([k, v]) => ({ value: k, label: v.label }))}
                       style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
@@ -300,7 +445,17 @@ export default function ServerAddPage() {
                   </Form.Item>
                 </Col>
                 <Col xs={24} md={12}>
-                  <Form.Item name="enabled_os_checks" label="系统采集项">
+                  <Form.Item
+                    name="enabled_os_checks"
+                    label="系统采集项"
+                    required={collectMode !== 'db'}
+                    rules={[{
+                      validator: (_, value: string[]) =>
+                        collectMode !== 'db' && !(value && value.length > 0)
+                          ? Promise.reject(new Error('至少选择一项'))
+                          : Promise.resolve(),
+                    }]}
+                  >
                     <Checkbox.Group
                       options={(meta?.os_checks || []).map((k) => ({
                         value: k,
@@ -333,32 +488,38 @@ export default function ServerAddPage() {
                   </Form.Item>
                 </Col>
                 <Col xs={24} sm={12} md={8}>
-                  <Form.Item name="db_host" label="数据库主机">
+                  <Form.Item name="db_host" label="数据库主机" rules={[requireIf(collectMode !== 'os')]} required={collectMode !== 'os'}>
                     <Input disabled={collectMode === 'os'} />
                   </Form.Item>
                 </Col>
                 <Col xs={8} sm={6} md={4}>
-                  <Form.Item name="db_port" label="数据库端口">
+                  <Form.Item name="db_port" label="数据库端口" rules={[requireIf(collectMode !== 'os')]} required={collectMode !== 'os'}>
                     <InputNumber min={1} max={65535} style={{ width: '100%' }} disabled={collectMode === 'os'} />
                   </Form.Item>
                 </Col>
                 <Col xs={8} sm={6} md={6}>
-                  <Form.Item name="db_user" label="数据库用户">
+                  <Form.Item name="db_user" label="数据库用户" rules={[requireIf(collectMode !== 'os')]} required={collectMode !== 'os'}>
                     <Input disabled={collectMode === 'os'} />
                   </Form.Item>
                 </Col>
                 <Col xs={8} sm={6} md={6}>
-                  <Form.Item name="db_pass" label="数据库密码" extra={editId ? '留空表示不修改' : undefined}>
+                  <Form.Item
+                    name="db_pass"
+                    label="数据库密码"
+                    extra={editId ? '留空表示不修改' : undefined}
+                    rules={[requireIf(!editId && collectMode !== 'os')]}
+                    required={!editId && collectMode !== 'os'}
+                  >
                     <Input.Password placeholder={editId ? '（已保存）' : ''} disabled={collectMode === 'os'} />
                   </Form.Item>
                 </Col>
                 <Col xs={24} sm={12} md={8}>
-                  <Form.Item name="db_name" label="数据库名">
+                  <Form.Item name="db_name" label="数据库名" rules={[requireIf(collectMode !== 'os')]} required={collectMode !== 'os'}>
                     <Input disabled={collectMode === 'os'} />
                   </Form.Item>
                 </Col>
                 <Col xs={24} sm={12} md={8}>
-                  <Form.Item name="isql_cmd" label="CLI 命令">
+                  <Form.Item name="isql_cmd" label="CLI 命令" rules={[requireIf(collectMode !== 'os')]} required={collectMode !== 'os'}>
                     <Input placeholder="isql / mysql / psql / sqlplus" disabled={collectMode === 'os'} />
                   </Form.Item>
                 </Col>
@@ -386,7 +547,7 @@ export default function ServerAddPage() {
                   </Form.Item>
                 </Col>
                 <Col xs={24} sm={12} md={8}>
-                  <Form.Item name="svc_name" label="服务名" extra="数据库服务名称（如 oscardb_OSRDBd）">
+                  <Form.Item name="svc_name" label="服务名" extra="数据库服务名称（如 oscardb_OSRDBd）" rules={[requireIf(!!wInControl)]} required={!!wInControl}>
                     <Input placeholder="oscardb_OSRDBd" />
                   </Form.Item>
                 </Col>
@@ -408,12 +569,12 @@ export default function ServerAddPage() {
                   <Alert type="warning" showIcon style={{ marginBottom: 8 }} message="已选择「自定义脚本」模式，请填写下方启动与停止命令（通过 SSH 在服务器上执行的 Shell 命令）。" />
                 </Col>
                 <Col xs={24} md={12} style={{ display: svcMgr === 'script' ? 'block' : 'none' }}>
-                  <Form.Item name="svc_start_cmd" label="启动命令" extra="点击「启动」时在服务器上执行的 Shell 命令">
+                  <Form.Item name="svc_start_cmd" label="启动命令" extra="点击「启动」时在服务器上执行的 Shell 命令" rules={[requireIf(svcMgr === 'script')]} required={svcMgr === 'script'}>
                     <Input.TextArea rows={2} placeholder="例如：su - oscar -c '/opt/oscardb/bin/oscar start'" />
                   </Form.Item>
                 </Col>
                 <Col xs={24} md={12} style={{ display: svcMgr === 'script' ? 'block' : 'none' }}>
-                  <Form.Item name="svc_stop_cmd" label="停止命令" extra="点击「停止」时在服务器上执行的 Shell 命令">
+                  <Form.Item name="svc_stop_cmd" label="停止命令" extra="点击「停止」时在服务器上执行的 Shell 命令" rules={[requireIf(svcMgr === 'script')]} required={svcMgr === 'script'}>
                     <Input.TextArea rows={2} placeholder="例如：su - oscar -c '/opt/oscardb/bin/oscar stop'" />
                   </Form.Item>
                 </Col>
@@ -427,8 +588,22 @@ export default function ServerAddPage() {
                   </div>
                 </Col>
                 <Col span={24}>
-                  <Form.Item name="persist_enabled" label="启用日志持久化（需全局配置日志库）" valuePropName="checked" extra="采集到的数据库错误与慢 SQL 写入全局日志库">
-                    <Switch />
+                  {!logEnabled && (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      style={{ marginBottom: 8 }}
+                      message="全局日志持久化未开启"
+                      description="请先在「系统配置」中开启日志持久化并配置日志库，否则该服务器无法写入日志。"
+                    />
+                  )}
+                  <Form.Item
+                    name="persist_enabled"
+                    label="启用日志持久化（需全局配置日志库）"
+                    valuePropName="checked"
+                    extra={logEnabled ? '采集到的数据库错误与慢 SQL 写入全局日志库' : '需先在系统配置中开启日志持久化'}
+                  >
+                    <Switch disabled={!logEnabled} />
                   </Form.Item>
                 </Col>
               </Row>
@@ -460,17 +635,17 @@ export default function ServerAddPage() {
 
           <div style={{ display: currentStep === 4 ? 'block' : 'none' }}>
             <Descriptions column={2} size="small" bordered>
-              <Descriptions.Item label="服务器名称">{form.getFieldValue('name') || '-'}</Descriptions.Item>
-              <Descriptions.Item label="数据库类型">{collectMode === 'os' ? '无需数据库' : (form.getFieldValue('db_type') || 'oscar').toUpperCase()}</Descriptions.Item>
-              <Descriptions.Item label="SSH 地址">{form.getFieldValue('ssh_host') || '本地'}:{form.getFieldValue('ssh_port') ?? 22}</Descriptions.Item>
-              <Descriptions.Item label="操作系统">{form.getFieldValue('os_type') || 'linux'}</Descriptions.Item>
+              <Descriptions.Item label="服务器名称">{wName || '-'}</Descriptions.Item>
+              <Descriptions.Item label="数据库类型">{collectMode === 'os' ? '无需数据库' : (wDbType || 'oscar').toUpperCase()}</Descriptions.Item>
+              <Descriptions.Item label="SSH 地址">{wSshHost || '本地'}:{wSshPort ?? 22}</Descriptions.Item>
+              <Descriptions.Item label="操作系统">{OS_LABELS[wOsType || 'linux'] || wOsType || 'Linux'}</Descriptions.Item>
               <Descriptions.Item label="采集模式">{collectMode === 'os' ? '仅系统' : collectMode === 'db' ? '仅数据库' : '系统 + 数据库'}</Descriptions.Item>
-              <Descriptions.Item label="数据库连接">{collectMode === 'os' ? '无需数据库' : `${form.getFieldValue('db_host') || '-'}:${form.getFieldValue('db_port') ?? '-'}`}</Descriptions.Item>
-              <Descriptions.Item label="数据库类别">{form.getFieldValue('enabled_categories')?.length ?? 0} 项</Descriptions.Item>
-              <Descriptions.Item label="系统采集项">{form.getFieldValue('enabled_os_checks')?.length ?? 0} 项</Descriptions.Item>
-              <Descriptions.Item label="数据库管控">{form.getFieldValue('in_control') ? '启用' : '停用'}</Descriptions.Item>
+              <Descriptions.Item label="数据库连接">{collectMode === 'os' ? '无需数据库' : `${wDbHost || '-'}:${wDbPort ?? '-'}`}</Descriptions.Item>
+              <Descriptions.Item label="数据库类别">{wCategories?.length ?? 0} 项</Descriptions.Item>
+              <Descriptions.Item label="系统采集项">{wOsChecks?.length ?? 0} 项</Descriptions.Item>
+              <Descriptions.Item label="数据库管控">{wInControl ? '启用' : '停用'}</Descriptions.Item>
               <Descriptions.Item label="应用监控">{apps.length} 个</Descriptions.Item>
-              <Descriptions.Item label="日志持久化">{form.getFieldValue('persist_enabled') ? '启用' : '停用'}</Descriptions.Item>
+              <Descriptions.Item label="日志持久化">{!logEnabled ? '停用（全局未开启）' : (wPersist ? '启用' : '停用')}</Descriptions.Item>
             </Descriptions>
           </div>
         </div>
