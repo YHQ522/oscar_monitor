@@ -1,0 +1,418 @@
+{% extends "base.html" %}
+{% block title %}帮助手册 - 管控平台{% endblock %}
+{% block head %}
+<style>
+.help-card { border: 1px solid rgba(99,102,241,0.08); border-radius: 10px; background: rgba(255,255,255,0.5); }
+.help-card .card-header { background: rgba(99,102,241,0.04); font-weight: 600; }
+.help-table th { font-size: 0.8rem; white-space: nowrap; }
+.help-table td { font-size: 0.82rem; }
+.badge-db { font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; }
+.badge-oscar { background: #6366F1; color: #fff; }
+.badge-mysql { background: #06B6D4; color: #fff; }
+.badge-pg { background: #3B82F6; color: #fff; }
+.badge-oracle { background: #F59E0B; color: #fff; }
+.step-num { display: inline-flex; width: 22px; height: 22px; border-radius: 50%; background: var(--primary); color: #fff; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 700; margin-right: 4px; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4><i class="bi bi-book"></i> 帮助手册</h4>
+    <span class="badge bg-secondary small">v2.0 · 多数据库版</span>
+</div>
+
+<div class="row g-3">
+    <!-- 侧边导航 -->
+    <div class="col-3 d-none d-md-block">
+        <nav class="list-group small sticky-top" style="top:70px;max-height:calc(100vh - 80px);overflow-y:auto;">
+            <a class="list-group-item list-group-item-action" href="#quickstart"><i class="bi bi-rocket-takeoff"></i> 快速入门</a>
+            <a class="list-group-item list-group-item-action" href="#arch"><i class="bi bi-diagram-3"></i> 多数据库架构</a>
+            <a class="list-group-item list-group-item-action" href="#dashboard"><i class="bi bi-speedometer2"></i> 仪表板与健康评分</a>
+            <a class="list-group-item list-group-item-action" href="#detail"><i class="bi bi-graph-up"></i> 详情与趋势图</a>
+            {% if 'servers_view' in user_perms or 'servers_edit' in user_perms or is_admin %}
+            <a class="list-group-item list-group-item-action" href="#servers"><i class="bi bi-server"></i> 服务管理</a>
+            {% endif %}
+            <a class="list-group-item list-group-item-action" href="#reports"><i class="bi bi-file-earmark-spreadsheet"></i> 巡检导出</a>
+            {% if 'control_view' in user_perms or 'control_exec' in user_perms or is_admin %}
+            <a class="list-group-item list-group-item-action" href="#control"><i class="bi bi-power"></i> 启停管控</a>
+            {% endif %}
+            {% if is_admin %}
+            <a class="list-group-item list-group-item-action text-primary" href="#sql"><i class="bi bi-terminal"></i> SQL 终端</a>
+            {% endif %}
+            <a class="list-group-item list-group-item-action" href="#security"><i class="bi bi-shield-check"></i> 登录安全</a>
+            <a class="list-group-item list-group-item-action" href="#profile"><i class="bi bi-person-gear"></i> 个人设置</a>
+            <a class="list-group-item list-group-item-action" href="#faq"><i class="bi bi-question-circle"></i> 常见问题</a>
+            {% if is_admin %}
+            <a class="list-group-item list-group-item-action text-danger" href="#admin"><i class="bi bi-gear"></i> 系统管理</a>
+            {% endif %}
+        </nav>
+    </div>
+
+    <div class="col-12 col-md-9">
+
+        <!-- ═══ 快速入门 ═══ -->
+        <div class="card help-card mb-3" id="quickstart">
+            <div class="card-header"><i class="bi bi-rocket-takeoff"></i> 快速入门</div>
+            <div class="card-body small">
+                <div class="row g-3 mb-2">
+                    <div class="col-md-6">
+                        <div class="p-2 rounded" style="background:rgba(99,102,241,0.04);">
+                            <strong>👤 普通用户</strong>
+                            <ol class="mb-0 mt-1 ps-3">
+                                <li>登录系统，浏览仪表板查看全局状态</li>
+                                <li>点击服务卡片进入详情，查看完整采集数据</li>
+                                <li>使用巡检导出生成 Excel 报告</li>
+                            </ol>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="p-2 rounded" style="background:rgba(239,68,68,0.04);">
+                            <strong>🔧 管理员</strong>
+                            <ol class="mb-0 mt-1 ps-3">
+                                <li>添加服务器（支持 4 种数据库）</li>
+                                <li>管理用户权限、系统配置</li>
+                                <li>SQL 终端直连查询、启停管控</li>
+                            </ol>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ 多数据库架构 ═══ -->
+        <div class="card help-card mb-3" id="arch">
+            <div class="card-header"><i class="bi bi-diagram-3"></i> 多数据库架构</div>
+            <div class="card-body small">
+                <p>本系统通过 <strong>SSH 远程连接</strong> + <strong>CLI 命令行</strong> 方式采集数据，支持四种数据库类型：</p>
+                <table class="table table-sm table-bordered help-table mb-2">
+                    <tr class="table-secondary"><th>数据库</th><th>标识</th><th>CLI 工具</th><th>默认端口</th><th>监控视图</th></tr>
+                    <tr>
+                        <td><span class="badge-db badge-oscar">Oscar</span></td>
+                        <td><code>oscar</code></td>
+                        <td><code>isql</code></td>
+                        <td>2003</td>
+                        <td>V$ 系统视图</td>
+                    </tr>
+                    <tr>
+                        <td><span class="badge-db badge-mysql">MySQL</span></td>
+                        <td><code>mysql</code></td>
+                        <td><code>mysql</code></td>
+                        <td>3306</td>
+                        <td>information_schema / performance_schema</td>
+                    </tr>
+                    <tr>
+                        <td><span class="badge-db badge-pg">PostgreSQL</span></td>
+                        <td><code>postgresql</code></td>
+                        <td><code>psql</code></td>
+                        <td>5432</td>
+                        <td>pg_stat_* / information_schema</td>
+                    </tr>
+                    <tr>
+                        <td><span class="badge-db badge-oracle">Oracle</span></td>
+                        <td><code>oracle</code></td>
+                        <td><code>sqlplus</code></td>
+                        <td>1521</td>
+                        <td>V$ / DBA_ 视图</td>
+                    </tr>
+                </table>
+                <div class="alert alert-info py-1 small mb-0">
+                    <i class="bi bi-lightbulb"></i> 系统根据数据库类型自动选择对应的 CLI 命令和监控 SQL，无需手动切换。
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ 仪表板与健康评分 ═══ -->
+        <div class="card help-card mb-3" id="dashboard">
+            <div class="card-header"><i class="bi bi-speedometer2"></i> 仪表板与健康评分</div>
+            <div class="card-body small">
+                <p><strong>首页仪表板</strong>以卡片形式展示所有已配置的服务：</p>
+                <table class="table table-sm table-bordered help-table mb-2">
+                    <tr class="table-secondary"><th>元素</th><th>说明</th></tr>
+                    <tr>
+                        <td><span class="badge bg-success">85分</span></td>
+                        <td><strong>健康评分</strong>：0-100 分综合指标，权重：CPU 25% · 内存 25% · 连接数 20% · 慢SQL 15% · 死锁 15%<br>
+                        🟢 ≥80 健康 · 🟡 60-79 关注 · 🔴 &lt;60 告警</td>
+                    </tr>
+                    <tr><td>OS 图标 🪟/🐧</td><td>标识服务器操作系统类型（Windows/Linux）</td></tr>
+                    <tr><td>DB 徽章</td><td>彩色徽章显示数据库类型（Oscar/MySQL/PG/Oracle）</td></tr>
+                    <tr><td>内存 / 磁盘 / CPU</td><td>实时采集的操作系统指标，进度条颜色随使用率变化</td></tr>
+                    <tr><td>趋势箭头 ↑↓→</td><td>与上次采集对比，直观感知指标变化方向</td></tr>
+                    <tr><td>⚡ 采集按钮</td><td>手动触发单台服务器采集</td></tr>
+                    <tr><td>🔍 搜索框</td><td>按服务器名称、主机、数据库名实时过滤</td></tr>
+                    <tr><td>📡 实时推送</td><td>后台每 30 秒自动采集，SSE 推送更新</td></tr>
+                </table>
+            </div>
+        </div>
+
+        <!-- ═══ 详情与趋势图 ═══ -->
+        <div class="card help-card mb-3" id="detail">
+            <div class="card-header"><i class="bi bi-graph-up"></i> 详情与趋势图</div>
+            <div class="card-body small">
+                <h6>采集类别（5 大类，所有数据库通用）</h6>
+                <table class="table table-sm table-bordered help-table mb-3">
+                    <tr class="table-secondary"><th>类别</th><th>典型采集项</th></tr>
+                    <tr><td>📋 基础信息</td><td>版本号、版本详情、非默认参数</td></tr>
+                    <tr><td>🗄 数据库信息</td><td>数据库列表、主备节点状态、HA 复制信息</td></tr>
+                    <tr><td>💾 存储空间</td><td>有效空间、Schema 空间、表空间、数据文件、日志文件</td></tr>
+                    <tr><td>📦 对象统计</td><td>表/索引/视图/存储过程数量（总量 + 按用户分组）</td></tr>
+                    <tr><td>⚡ 性能监控</td><td>连接数、死锁、等待链、活跃 SQL、慢 SQL TOP20、内存使用</td></tr>
+                </table>
+                <div class="alert alert-info py-1 small mb-2">
+                    <i class="bi bi-info-circle"></i> 不同数据库的采集 SQL 自动适配，如 Oracle 查 DBA_TABLES、MySQL 查 information_schema.tables。
+                </div>
+
+                <h6>历史趋势图</h6>
+                <ul class="mb-0">
+                    <li><strong>多指标折线图</strong>：CPU%（红）、内存%（橙）、连接数（蓝）、慢SQL（紫虚线）</li>
+                    <li><strong>双 Y 轴</strong>：左侧百分比轴（CPU/内存），右侧数量轴（连接/慢SQL）</li>
+                    <li><strong>时间范围</strong>：下拉切换 1 小时 / 6 小时 / 24 小时</li>
+                    <li><strong>数据积累</strong>：每次采集自动记录，最多保留 288 个点（24 小时 @ 5 分钟）</li>
+                    <li>趋势数据存储在内存中，重启服务后清空</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- ═══ 服务管理 ═══ -->
+        {% if 'servers_view' in user_perms or 'servers_edit' in user_perms or is_admin %}
+        <div class="card help-card mb-3" id="servers">
+            <div class="card-header"><i class="bi bi-server"></i> 服务管理</div>
+            <div class="card-body small">
+                {% if 'servers_edit' in user_perms or is_admin %}
+                <h6>6 步向导添加服务</h6>
+                <p class="text-muted small">添加和编辑均使用统一的 6 步向导流程：</p>
+                <table class="table table-sm table-bordered help-table mb-3">
+                    <tr class="table-secondary"><th style="width:30px;">#</th><th>步骤</th><th>说明</th></tr>
+                    <tr>
+                        <td><span class="step-num">1</span></td>
+                        <td><strong>环境</strong></td>
+                        <td>选择操作系统（Linux/Windows）、填写显示名称、设置自动刷新间隔（秒，0=关闭）</td>
+                    </tr>
+                    <tr>
+                        <td><span class="step-num">2</span></td>
+                        <td><strong>SSH 连接</strong></td>
+                        <td>远程主机 IP、SSH 端口（默认 22）、登录用户名和密码。Windows 需安装 OpenSSH Server</td>
+                    </tr>
+                    <tr>
+                        <td><span class="step-num">3</span></td>
+                        <td><strong>采集项</strong></td>
+                        <td>勾选需要采集的数据库类别（5 类）和 OS 检查项（内存/磁盘/CPU/日志）。提供快速配置下拉：全部 / 仅DB / 仅OS / 最小</td>
+                    </tr>
+                    <tr>
+                        <td><span class="step-num">4</span></td>
+                        <td><strong>数据库</strong></td>
+                        <td>选择数据库类型（Oscar/MySQL/PostgreSQL/Oracle）、是否持久化日志、是否加入启停管控、数据库连接信息（主机/端口/用户/密码/库名/isql路径）。<br><span class="text-muted">若步骤③未勾选任何 DB 采集项，此步骤自动跳过。</span></td>
+                    </tr>
+                    <tr>
+                        <td><span class="step-num">5</span></td>
+                        <td><strong>应用</strong></td>
+                        <td>配置关联应用（可选）：应用名称、启停脚本模板（systemctl/service/init.d/自定义脚本/sc）或自定义命令</td>
+                    </tr>
+                    <tr>
+                        <td><span class="step-num">6</span></td>
+                        <td><strong>完成</strong></td>
+                        <td>测试 SSH 和数据库连接，确认无误后保存</td>
+                    </tr>
+                </table>
+
+                <h6>服务列表功能</h6>
+                <ul class="mb-2">
+                    <li><strong>查看详情</strong>：点击服务名进入详情页，查看完整采集数据</li>
+                    <li><strong>编辑</strong>：同样使用 6 步向导修改配置</li>
+                    <li><strong>删除</strong>：移除服务（需二次确认），支持批量删除</li>
+                    <li><strong>OS 图标</strong>：🪟 Windows / 🐧 Linux，一目了然</li>
+                    <li><strong>DB 徽章</strong>：彩色标签显示数据库类型</li>
+                </ul>
+                {% else %}
+                <ul class="mb-0">
+                    <li><strong>查看详情</strong>：点击服务名进入详情页，查看完整采集数据</li>
+                </ul>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- ═══ 巡检导出 ═══ -->
+        <div class="card help-card mb-3" id="reports">
+            <div class="card-header"><i class="bi bi-file-earmark-spreadsheet"></i> 巡检导出</div>
+            <div class="card-body small">
+                <p>一键生成 Excel 巡检报告，支持按服务器或按类别分 Sheet 组织。</p>
+                <table class="table table-sm table-bordered help-table mb-2">
+                    <tr class="table-secondary"><th>功能</th><th>说明</th></tr>
+                    <tr><td>📋 服务器选择</td><td>勾选要导出的服务器，支持全选/清空。选中的服务器会按 DB 类型过滤可用分类</td></tr>
+                    <tr><td>📊 采集项选择</td><td>数据库 5 大类 + 系统 4 大项，独立勾选</td></tr>
+                    <tr><td>📑 组织方式</td><td><strong>按服务器分 Sheet</strong>：每台服务器一个 Sheet，汇总所有采集项<br><strong>按类别分 Sheet</strong>：每个类别一个 Sheet，汇总所有服务器数据</td></tr>
+                    <tr><td>⏰ 定时导出</td><td>支持每天/每周/每月定时自动生成报告，可设置保留份数</td></tr>
+                    <tr><td>📜 导出历史</td><td>右侧面板显示历史报告列表，支持下载和删除</td></tr>
+                    <tr><td>📥 一键下载</td><td>点击"导出 Excel"即时生成并下载</td></tr>
+                </table>
+                <div class="alert alert-info py-1 small mb-0">
+                    <i class="bi bi-lightbulb"></i> 同一台服务器如果多次导出，系统会自动使用最新缓存数据。报告文件名格式：<code>巡检报告_YYYYMMDD_HHMMSS.xlsx</code>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ 启停管控 ═══ -->
+        {% if 'control_view' in user_perms or 'control_exec' in user_perms or is_admin %}
+        <div class="card help-card mb-3" id="control">
+            <div class="card-header"><i class="bi bi-power"></i> 启停管控</div>
+            <div class="card-body small">
+                <p>远程管理数据库服务和关联应用的启停状态。</p>
+                <table class="table table-sm table-bordered help-table mb-2">
+                    <tr class="table-secondary"><th>服务管理器</th><th>适用场景</th></tr>
+                    <tr><td><code>systemctl</code></td><td>现代 Linux（Kylin V10、CentOS 7+、Ubuntu 16+）</td></tr>
+                    <tr><td><code>service</code></td><td>老旧 Linux（CentOS 6）</td></tr>
+                    <tr><td><code>/etc/init.d/</code></td><td>无 systemd 的旧系统</td></tr>
+                    <tr><td><code>脚本</code></td><td>自定义启停命令，适合特殊部署场景</td></tr>
+                    <tr><td><code>sc</code></td><td>Windows 服务管理</td></tr>
+                </table>
+                <p class="small">应用服务可额外配置 <strong>启动组</strong>（按组批量操作）和 <strong>健康检查 URL</strong>（启动后自动验证）。</p>
+                {% if 'control_exec' in user_perms or is_admin %}
+                <div class="alert alert-warning py-1 small mb-0">
+                    <i class="bi bi-exclamation-triangle"></i> 启动/停止/重启操作需二次确认，防止误操作。
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- ═══ SQL 终端（仅管理员） ═══ -->
+        {% if is_admin %}
+        <div class="card help-card mb-3 border-primary" id="sql">
+            <div class="card-header" style="background:rgba(99,102,241,0.1);"><i class="bi bi-terminal"></i> SQL 终端 <span class="badge bg-warning text-dark ms-1">仅管理员</span></div>
+            <div class="card-body small">
+                <p>全屏独立 SQL 查询页面（右上角用户名菜单 → SQL 终端），暗色主题代码编辑器。</p>
+                <h6>功能特性</h6>
+                <table class="table table-sm table-bordered help-table mb-2">
+                    <tr class="table-secondary"><th>功能</th><th>说明</th></tr>
+                    <tr><td>🔒 安全限制</td><td>仅允许只读查询：SELECT、WITH、EXPLAIN、SHOW、DESC。写操作自动拦截返回 403</td></tr>
+                    <tr><td>🔄 服务器切换</td><td>顶部下拉框选择目标服务器</td></tr>
+                    <tr><td>📦 快捷模板</td><td>根据所选服务器的数据库类型，动态显示对应的预设 SQL 模板（Oscar/MySQL/PG/Oracle 各有不同）</td></tr>
+                    <tr><td>📜 历史记录</td><td>最近 30 条查询保存在浏览器本地，点击回填。↑↓ 方向键快速浏览</td></tr>
+                    <tr><td>⌨️ 快捷键</td><td><kbd>Ctrl+Enter</kbd> 执行 · <kbd>↑</kbd><kbd>↓</kbd> 历史导航</td></tr>
+                    <tr><td>⏱ 执行耗时</td><td>显示每次查询的实际执行时间</td></tr>
+                    <tr><td>📥 结果导出</td><td>CSV（浏览器端即时导出）+ Excel（后端生成下载）</td></tr>
+                </table>
+                <div class="alert alert-danger py-1 small mb-0">
+                    <i class="bi bi-shield-lock"></i> 仅管理员可用，普通用户访问 URL 直接返回 403。
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- ═══ 登录安全 ═══ -->
+        <div class="card help-card mb-3" id="security">
+            <div class="card-header"><i class="bi bi-shield-check"></i> 登录安全</div>
+            <div class="card-body small">
+                <table class="table table-sm table-bordered help-table mb-0">
+                    <tr class="table-secondary"><th>安全机制</th><th>说明</th></tr>
+                    <tr><td>🔐 密码加密</td><td>PBKDF2-SHA256（10 万次迭代）+ 随机盐值，非明文存储</td></tr>
+                    <tr><td>🚫 登录限速</td><td>同 IP 5 分钟内失败 5 次 → 封禁 15 分钟。admin 不受限速影响</td></tr>
+                    <tr><td>⏰ 会话超时</td><td>30 分钟无操作自动退出</td></tr>
+                    <tr><td>🔑 密码修改</td><td>需输入原密码验证，忘记密码联系管理员重置</td></tr>
+                    <tr><td>🛡️ 权限控制</td><td>每个页面和 API 均有权限校验，无权限返回 403</td></tr>
+                </table>
+            </div>
+        </div>
+
+        <!-- ═══ 个人设置 ═══ -->
+        <div class="card help-card mb-3" id="profile">
+            <div class="card-header"><i class="bi bi-person-gear"></i> 个人设置</div>
+            <div class="card-body small">
+                <p><strong>修改密码</strong>：右上角用户名 → 修改密码，输入原密码和新密码（至少 4 位）。</p>
+                <p><strong>忘记密码</strong>：联系管理员在「用户管理」中重置密码。</p>
+                <p><strong>界面主题</strong>：Aurora 设计风格，靛蓝 + 青色 + 琥珀配色，毛玻璃卡片效果。</p>
+            </div>
+        </div>
+
+        <!-- ═══ 常见问题 ═══ -->
+        <div class="card help-card mb-3" id="faq">
+            <div class="card-header"><i class="bi bi-question-circle"></i> 常见问题</div>
+            <div class="card-body small">
+                <div class="mb-3">
+                    <strong>Q: 支持哪些数据库？</strong>
+                    <p class="mb-1 text-muted">Oscar（神通）、MySQL、PostgreSQL、Oracle。添加服务时选择对应类型，系统自动适配 CLI 命令和监控 SQL。</p>
+                </div>
+                <div class="mb-3">
+                    <strong>Q: 数据采集返回空或报错</strong>
+                    <p class="mb-1 text-muted">① 检查采集项是否勾选 ② SSH 连接是否正常 ③ isql/mysql/psql/sqlplus 路径是否正确 ④ 数据库用户是否有查询权限。</p>
+                </div>
+                <div class="mb-3">
+                    <strong>Q: 测试连接失败</strong>
+                    <p class="mb-1 text-muted"><strong>SSH</strong>：检查端口 22 是否开放、用户名密码是否正确。Windows 需安装 OpenSSH Server。<br><strong>数据库</strong>：检查 CLI 工具路径，如 <code>isql -h 主机 -p 端口 -d 库名 -U 用户/密码</code>。</p>
+                </div>
+                <div class="mb-3">
+                    <strong>Q: 健康评分不显示</strong>
+                    <p class="mb-1 text-muted">需先执行采集获取数据，评分在采集完成后自动计算。采集失败则评分不更新。</p>
+                </div>
+                <div class="mb-3">
+                    <strong>Q: 趋势图没有数据</strong>
+                    <p class="mb-1 text-muted">至少需要 2 次采集才有折线。趋势数据在内存中，重启服务后清空。建议开启定时采集。</p>
+                </div>
+                <div class="mb-3">
+                    <strong>Q: 登录被限制</strong>
+                    <p class="mb-1 text-muted">连续 5 次密码错误后同 IP 封禁 15 分钟。等待倒计时结束或联系管理员。</p>
+                </div>
+                <div class="mb-3">
+                    <strong>Q: 我能看到哪些页面？</strong>
+                    <p class="mb-1 text-muted">取决于管理员分配的权限：仪表板 / 服务管理(查看/编辑) / 启停管控(查看/执行)。admin 拥有全部权限。</p>
+                </div>
+                <div>
+                    <strong>Q: 巡检报告能导出什么？</strong>
+                    <p class="mb-1 text-muted">Excel 格式，包含所有选中服务器的 DB 采集数据和 OS 检查数据。支持按服务器分 Sheet 或按类别分 Sheet。</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ 系统管理（仅管理员） ═══ -->
+        {% if is_admin %}
+        <hr class="my-4">
+        <h5 class="text-danger"><i class="bi bi-shield-lock"></i> 以下内容仅管理员可见</h5>
+
+        <div class="card help-card mb-3 border-danger" id="admin">
+            <div class="card-header" style="background:rgba(239,68,68,0.08);"><i class="bi bi-gear"></i> 系统管理</div>
+            <div class="card-body small">
+
+                <h6>权限体系</h6>
+                <table class="table table-sm table-bordered help-table mb-3">
+                    <tr class="table-secondary"><th>权限</th><th>可访问功能</th></tr>
+                    <tr><td><code>dashboard</code></td><td>全局监控首页仪表板</td></tr>
+                    <tr><td><code>servers_view</code></td><td>服务列表、详情页、采集数据查看</td></tr>
+                    <tr><td><code>servers_edit</code></td><td>添加/编辑/删除服务配置（6 步向导）</td></tr>
+                    <tr><td><code>control_view</code></td><td>启停管控页、查看运行状态</td></tr>
+                    <tr><td><code>control_exec</code></td><td>启动/停止/重启数据库和应用</td></tr>
+                    <tr class="table-danger"><td><code>admin</code></td><td>用户管理、系统配置、SQL 终端、巡检导出</td></tr>
+                </table>
+
+                <h6>用户管理</h6>
+                <ul class="mb-3">
+                    <li><strong>添加用户</strong>：设置用户名、初始密码、分配权限</li>
+                    <li><strong>编辑权限</strong>：勾选/取消勾选对应权限，即时生效</li>
+                    <li><strong>重置密码</strong>：帮助忘记密码的用户重置（不支持查看原密码）</li>
+                    <li><strong>IP 解锁</strong>：查看被封锁的 IP 并手动解除封锁</li>
+                    <li><strong>删除用户</strong>：admin 账号不可删除</li>
+                </ul>
+
+                <h6>系统配置</h6>
+                <table class="table table-sm table-bordered help-table mb-3">
+                    <tr class="table-secondary"><th>配置项</th><th>说明</th></tr>
+                    <tr><td>数据库类型</td><td>持久化存储的数据库类型（Oscar/MySQL/PG/Oracle），选择后自动填充默认端口和连接信息</td></tr>
+                    <tr><td>日志持久化</td><td>开启后，错误和慢 SQL 写入持久化数据库表</td></tr>
+                    <tr><td>服务持久化</td><td>开启后，服务器配置同步写入数据库表</td></tr>
+                    <tr><td>日志保留天数</td><td>超期日志自动清理（默认 30 天）</td></tr>
+                    <tr><td>采集并发数</td><td>后台定时采集的线程池大小（1-20，默认 8）</td></tr>
+                </table>
+
+                <h6>部署说明</h6>
+                <ul class="mb-0">
+                    <li>配置文件：<code>data/config.json</code> · <code>data/servers.json</code> · <code>data/users.json</code></li>
+                    <li>Linux：<code>sudo bash install.sh</code> 安装为 systemd 服务</li>
+                    <li>Windows：双击 <code>build_win.bat</code> 打包为 exe，或直接 <code>python app.py</code></li>
+                    <li>默认端口：5080（<code>--port</code> 参数可自定义）</li>
+                    <li>持久化表：<code>OSCAR_SERVERS</code> / <code>OSCAR_USERS</code> / <code>OSCAR_LOG_COLLECT</code></li>
+                </ul>
+            </div>
+        </div>
+        {% endif %}
+
+    </div>
+</div>
+{% endblock %}

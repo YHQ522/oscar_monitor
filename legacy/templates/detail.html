@@ -1,0 +1,884 @@
+{% extends "base.html" %}
+{% block title %}{{ server.name or server.ssh_host }} - 详情{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3" style="position:fixed;top:50px;left:0;right:0;z-index:99;background:rgba(255,255,255,0.75);backdrop-filter:blur(12px);padding:8px 16px;">
+    <h4>
+        <a href="/" class="text-decoration-none"><i class="bi bi-speedometer2"></i></a> /
+        <i class="bi bi-server"></i> {{ server.name or server.ssh_host }}
+    </h4>
+    <div>
+        <button class="btn btn-success btn-sm" onclick="collectAll()"><i class="bi bi-play-fill"></i> 全部采集</button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="toggleAutoRefresh()" id="autoRefreshBtn">
+            <i class="bi bi-arrow-repeat"></i> 自动刷新: <span id="autoRefreshLabel">关</span>
+        </button>
+        <a href="/servers" class="btn btn-outline-primary btn-sm"><i class="bi bi-gear"></i> 服务管理</a>
+    </div>
+</div>
+
+<div class="row g-3" style="padding-top:96px;">
+    <div class="col-md-3">
+        <div class="card" style="position:sticky;top:104px;">
+            <div class="card-header"><strong><i class="bi bi-list-check"></i> 采集选项</strong></div>
+            <div class="card-body p-1" style="max-height:calc(100vh - 110px);overflow-y:auto;">
+                <div class="d-grid gap-1">
+                    {% set enabled_cats = server.enabled_categories %}
+                    {% set enabled_os = server.enabled_os_checks %}
+                    {% if 'basic_info' in enabled_cats %}
+                    <button class="btn btn-outline-info btn-sm text-start" onclick="collectCategory('basic_info')">
+                        <i class="bi bi-info-circle"></i> {{ query_sets.basic_info.label }}
+                    </button>
+                    {% endif %}
+                    {% if 'db_info' in enabled_cats %}
+                    <button class="btn btn-outline-info btn-sm text-start" onclick="collectCategory('db_info')">
+                        <i class="bi bi-database"></i> {{ query_sets.db_info.label }}
+                    </button>
+                    {% endif %}
+                    {% if 'storage' in enabled_cats %}
+                    <button class="btn btn-outline-info btn-sm text-start" onclick="collectCategory('storage')">
+                        <i class="bi bi-hdd"></i> {{ query_sets.storage.label }}
+                    </button>
+                    {% endif %}
+                    {% if 'objects' in enabled_cats %}
+                    <button class="btn btn-outline-info btn-sm text-start" onclick="collectCategory('objects')">
+                        <i class="bi bi-grid"></i> {{ query_sets.objects.label }}
+                    </button>
+                    {% endif %}
+                    {% if 'performance' in enabled_cats %}
+                    <button class="btn btn-outline-info btn-sm text-start" onclick="collectCategory('performance')">
+                        <i class="bi bi-graph-up"></i> {{ query_sets.performance.label }}
+                    </button>
+                    {% endif %}
+                    {% if 'install_path' in enabled_os %}
+                    <button class="btn btn-outline-info btn-sm text-start" onclick="collectOsCheck('install_path')">
+                        <i class="bi bi-folder"></i> {{ os_check_labels.install_path }}
+                    </button>
+                    {% endif %}
+                    {% if 'db_log_errors' in enabled_os %}
+                    <button class="btn btn-outline-info btn-sm text-start" onclick="collectOsCheck('db_log_errors')">
+                        <i class="bi bi-file-earmark-text"></i> {{ os_check_labels.db_log_errors }}
+                    </button>
+                    <a class="btn btn-outline-success btn-sm text-start" href="/server/{{ server.id }}/log-history" target="_blank">
+                        <i class="bi bi-search"></i> 查询历史错误日志
+                    </a>
+                    {% endif %}
+                    {% if enabled_cats|length > 0 and enabled_os|length > 0 %}
+                    <hr class="my-1">
+                    {% endif %}
+                    {% if 'memory' in enabled_os %}
+                    <button class="btn btn-outline-warning btn-sm text-start" onclick="collectOsCheck('memory')">
+                        <i class="bi bi-memory"></i> {{ os_check_labels.memory }}
+                    </button>
+                    {% endif %}
+                    {% if 'disk' in enabled_os %}
+                    <button class="btn btn-outline-warning btn-sm text-start" onclick="collectOsCheck('disk')">
+                        <i class="bi bi-hdd-stack"></i> {{ os_check_labels.disk }}
+                    </button>
+                    {% endif %}
+                    {% if 'cpu' in enabled_os %}
+                    <button class="btn btn-outline-warning btn-sm text-start" onclick="collectOsCheck('cpu')">
+                        <i class="bi bi-cpu"></i> {{ os_check_labels.cpu }}
+                    </button>
+                    {% endif %}
+                    {% if 'os_errors' in enabled_os %}
+                    <button class="btn btn-outline-warning btn-sm text-start" onclick="collectOsCheck('os_errors')">
+                        <i class="bi bi-exclamation-triangle"></i> {{ os_check_labels.os_errors }}
+                    </button>
+                    {% endif %}
+                    {% if server.apps %}
+                    <hr class="my-1">
+                    <button class="btn btn-outline-success btn-sm text-start" onclick="collectAll()">
+                        <i class="bi bi-boxes"></i> 应用状态 ({{ server.apps|length }})
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-9">
+        <div id="collectStatus" class="alert alert-info" style="display:none;">
+            <i class="bi bi-hourglass-split"></i> 正在采集数据...
+        </div>
+        <div id="errorMsg" class="alert alert-danger" style="display:none;"></div>
+
+        <div id="dataContainer">
+            <div class="text-center p-5 text-muted">
+                <i class="bi bi-cloud-download" style="font-size:3rem;"></i>
+                <p class="mt-2">请选择左侧采集选项或点击"全部采集"获取数据</p>
+            </div>
+        </div>
+
+        <div class="card mt-3" id="trendPanel" style="display:none;">
+            <div class="card-header py-1 d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-graph-up"></i> <strong>历史趋势</strong></span>
+                <select class="form-select form-select-sm" style="width:auto;" onchange="loadTrends()" id="trendHours">
+                    <option value="1">最近1小时</option>
+                    <option value="6">最近6小时</option>
+                    <option value="24" selected>最近24小时</option>
+                </select>
+            </div>
+            <div class="card-body p-2"><canvas id="trendChart" style="width:100%;height:280px;"></canvas></div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+<script>
+const SERVER_ID = '{{ server.id }}';
+const queryLabels = {{ query_labels|tojson }};
+const osCheckLabels = {{ os_check_labels|tojson }};
+{% raw %}
+let autoRefreshTimer = null;
+let autoRefreshEnabled = false;
+
+// ═══════════════════════════════════════════════
+//  数据库列名 → 中文 对照表
+// ═══════════════════════════════════════════════
+const HDR_ZH = {
+    // 版本信息
+    'version':'版本号','versiondetail':'版本详细信息',
+    // 参数
+    'name':'参数名称','value':'参数值','isdefault':'是否默认值',
+    // 数据库信息
+    'db_name':'数据库名','db_user':'数据库用户','db_port':'端口',
+    'charset':'字符集','collation':'排序规则','db_size':'数据库大小',
+    // 表空间
+    'tsname':'表空间名','tsinitsize':'初始大小','tsnextsize':'扩展大小',
+    'tspctfree':'空闲百分比','tspctused':'已用百分比','tsfill':'填充因子',
+    // 数据文件
+    'fileid':'文件编号','path':'文件路径','current_size':'当前大小',
+    'freesize':'空闲大小','pct_used':'使用率','max_size':'最大大小',
+    'nextsize':'扩展大小','creationtime':'创建时间',
+    // 日志
+    'cur_lsn':'当前LSN','cur_lfile':'当前日志文件','cur_lsize':'当前日志大小',
+    // 存储空间
+    'effective_space':'有效空间','total_space':'总占用空间',
+    'table_space':'表占用空间','index_space':'索引占用空间',
+    // 对象统计
+    'username':'用户名','table_count':'表数量','index_count':'索引数量',
+    'view_count':'视图数量','procedure_count':'存储过程数量',
+    'total_table_num':'表总数','total_index_num':'索引总数',
+    'total_view_num':'视图总数','total_proc_num':'存储过程总数',
+    // 性能
+    'connection_count':'当前连接数','user_ip':'客户端IP',
+    'session id':'会话ID','current sql':'当前执行的SQL',
+    'logon user':'登录用户','session_status':'会话状态',
+    'non_auto_commit_count':'非自动提交连接数',
+    'idle_non_auto_commit':'空闲非自动提交数',
+    // 内存
+    'total_size':'总大小','used_size':'已用大小','free_size':'空闲大小',
+    'hit_ratio':'命中率',
+    // 通用
+    'count':'数量','size':'大小','total':'合计','used':'已用',
+    'free':'空闲','percent':'百分比','status':'状态',
+    'time(s)':'耗时(秒)','sql':'SQL语句',
+    'occur_time':'发生时间','error_msg':'错误信息',
+    'exec_user':'操作用户','exec_sql':'执行SQL','cost_seconds':'耗时(秒)',
+    'occur_count':'发生次数','check_type':'检查类型',
+    'server_name':'服务器名称',
+    // 主备
+    'sync_mode':'同步模式','sync_state':'同步状态','delay_size':'延迟大小',
+    'flush_lsn':'刷新LSN','replay_lsn':'回放LSN',
+    'slave_ip':'备库IP','slave_port':'备库端口',
+};
+
+function zhCol(col) {
+    if (!col) return '';
+    const k = col.trim().toLowerCase().replace(/\s+/g,' ');
+    if (HDR_ZH[k]) return HDR_ZH[k];
+    if (HDR_ZH[col.trim()]) return HDR_ZH[col.trim()];
+    // 尝试去掉下划线单独匹配
+    const parts = k.split(/[\s_]+/);
+    const translated = parts.map(p => HDR_ZH[p] || p).join(' ');
+    if (translated !== k) return translated;
+    return col.trim();
+}
+
+function fmtVal(col, val) {
+    if (val === null || val === undefined) return '<span class="text-muted">—</span>';
+    const s = String(val).trim();
+    if (s === '') return '<span class="text-muted">—</span>';
+    const cl = col.toLowerCase().replace(/\s+/g,'');
+    // 使用率/百分比类
+    if (cl.includes('pct') || cl.includes('percent') || cl.includes('ratio') || s.endsWith('%')) {
+        const n = parseFloat(s.replace('%',''));
+        if (!isNaN(n)) {
+            const c = n > 80 ? 'danger' : n > 60 ? 'warning' : 'success';
+            return `<span class="text-${c} fw-bold">${s}</span>`;
+        }
+    }
+    // 是否默认值
+    if (cl === 'isdefault') {
+        return s.toUpperCase() === 'TRUE' ? '<span class="badge bg-secondary">是</span>' : '<span class="badge bg-info">否</span>';
+    }
+    // 大小类 → 智能单位
+    if (cl.includes('size') || cl.includes('space')) {
+        const n = parseFloat(s);
+        if (!isNaN(n)) return fmtSize(n);
+    }
+    return escapeHtml(s);
+}
+
+function fmtSize(bytes) {
+    if (bytes >= 1073741824) return (bytes/1073741824).toFixed(2) + ' GB';
+    if (bytes >= 1048576) return (bytes/1048576).toFixed(2) + ' MB';
+    if (bytes >= 1024) return (bytes/1024).toFixed(2) + ' KB';
+    return bytes + ' B';
+}
+
+function renderTable(result) {
+    if (!result || result.error) {
+        return '<div class="alert alert-danger py-1 small mb-0">❌ ' + escapeHtml(result.error || '无数据') + '</div>';
+    }
+    if (!result.columns || result.columns.length === 0) {
+        if (result.rows && result.rows.length > 0) {
+            return '<pre class="small p-2 bg-light rounded mb-0">' + escapeHtml(result.rows.map(r => r.join(' | ')).join('\n')) + '</pre>';
+        }
+        return '<div class="text-muted small py-2 text-center">暂无数据</div>';
+    }
+    let html = '<div class="table-responsive"><table class="table table-sm table-hover mb-0" style="font-size:0.85rem;">';
+    html += '<thead class="table-light"><tr>';
+    result.columns.forEach(col => {
+        html += '<th class="small text-nowrap">' + zhCol(col) + '</th>';
+    });
+    html += '</tr></thead><tbody>';
+    if (result.rows && result.rows.length > 0) {
+        result.rows.forEach(row => {
+            html += '<tr>';
+            for (let i = 0; i < result.columns.length; i++) {
+                const colName = result.columns[i] || '';
+                html += '<td class="small">' + fmtVal(colName, row[i]) + '</td>';
+            }
+            html += '</tr>';
+        });
+    } else {
+        html += '<tr><td colspan="' + result.columns.length + '" class="text-muted text-center small py-3">暂无数据</td></tr>';
+    }
+    html += '</tbody></table></div>';
+    return html;
+}
+
+function renderCard(title, icon, content, badge) {
+    const b = badge ? '<span class="badge bg-secondary ms-2" style="font-size:0.7rem;">' + badge + '</span>' : '';
+    return `<div class="card mb-2 shadow-sm">
+        <div class="card-header py-1 px-2 d-flex align-items-center" style="background:#f0f2f5;">
+            <i class="bi bi-${icon} me-1 text-primary"></i> <strong class="small">${title}</strong>${b}
+        </div>
+        <div class="card-body p-2">${content}</div>
+    </div>`;
+}
+
+// ═══════════════════════════════════════════════
+//  内存渲染 (Win / Linux 统一)
+// ═══════════════════════════════════════════════
+function renderMemory(output, isWin) {
+    let totalMB, usedMB, freeMB, pct;
+
+    // ── 尝试 Windows 格式: TotalMB= TotalMB=... FreeMB=... UsedMB=...
+    const wm = output.match(/TotalMB=(\d+).*?FreeMB=(\d+).*?UsedMB=(\d+)/);
+    if (wm) {
+        totalMB = parseInt(wm[1]); usedMB = parseInt(wm[3]); freeMB = parseInt(wm[2]);
+    }
+    // ── 尝试 Linux free -h 格式: Mem:  15Gi  4.2Gi  8.1Gi ...
+    if (!totalMB) {
+        const fm = output.match(/Mem:\s+([\d.]+)\s*(\w?i?)\s+([\d.]+)\s*(\w?i?)\s+([\d.]+)\s*(\w?i?)/);
+        if (fm) {
+            totalMB = parseValMB(fm[1], fm[2]); usedMB = parseValMB(fm[3], fm[4]); freeMB = parseValMB(fm[5], fm[6]);
+        }
+    }
+    // ── 尝试 Linux /proc/meminfo 格式: MemTotal: ... kB
+    if (!totalMB) {
+        const mt = output.match(/MemTotal:\s+(\d+)/);
+        const mf = output.match(/MemFree:\s+(\d+)/);
+        const ma = output.match(/MemAvailable:\s+(\d+)/);
+        if (mt) {
+            totalMB = parseInt(mt[1]) / 1024;
+            freeMB = ma ? parseInt(ma[1]) / 1024 : (mf ? parseInt(mf[1]) / 1024 : 0);
+            usedMB = totalMB - freeMB;
+        }
+    }
+    if (!totalMB || totalMB <= 0) return '<pre class="small p-2 bg-light rounded mb-0">' + escapeHtml(output) + '</pre>';
+
+    pct = (usedMB / totalMB * 100);
+    const barColor = pct > 90 ? 'bg-danger' : pct > 70 ? 'bg-warning' : 'bg-success';
+    const totalGB = (totalMB / 1024).toFixed(1);
+    const usedGB = (usedMB / 1024).toFixed(1);
+    const freeGB = (freeMB / 1024).toFixed(1);
+
+    return `<div class="text-center mb-2">
+        <div style="font-size:2rem;font-weight:700;" class="text-${pct > 90 ? 'danger' : pct > 70 ? 'warning' : 'success'}">${pct.toFixed(1)}%</div>
+        <div class="small text-muted">内存使用率</div>
+        <div class="progress my-2" style="height:10px;">
+            <div class="progress-bar ${barColor}" style="width:${pct}%;"></div>
+        </div>
+    </div>
+    <div class="row text-center small">
+        <div class="col-4"><div class="text-muted">总容量</div><strong>${totalGB} GB</strong></div>
+        <div class="col-4"><div class="text-muted">已使用</div><strong class="text-${pct > 90 ? 'danger' : 'warning'}">${usedGB} GB</strong></div>
+        <div class="col-4"><div class="text-muted">可用</div><strong class="text-success">${freeGB} GB</strong></div>
+    </div>`;
+}
+
+function parseValMB(num, unit) {
+    let v = parseFloat(num) || 0;
+    const u = (unit || '').toLowerCase();
+    if (u === 'ti' || u === 't') v *= 1024 * 1024;
+    else if (u === 'gi' || u === 'g') v *= 1024;
+    else if (u === 'mi' || u === 'm') v *= 1;
+    else if (u === 'ki' || u === 'k') v /= 1024;
+    else if (u === 'b' || u === '') v /= 1024 / 1024;
+    // 如果数字明显很小(<100)且无单位，可能是 GB
+    if (!unit && v < 100 && v > 0) v *= 1024;
+    return v;
+}
+
+// ═══════════════════════════════════════════════
+//  磁盘渲染 (Win / Linux 统一)
+// ═══════════════════════════════════════════════
+function renderDisk(output, isWin) {
+    const disks = [];
+    // ── 尝试 Windows 格式: C 61.6GB/199.1GB
+    if (isWin || isWin === undefined) {
+        const lines = output.split('\n');
+        for (const line of lines) {
+            const m = line.match(/^(\w+)\s+([\d.]+)GB\/([\d.]+)GB/);
+            if (m) {
+                const used = parseFloat(m[2]), total = parseFloat(m[3]);
+                disks.push({name: m[1] + '盘', used: used, total: total, pct: total > 0 ? (used/total*100) : 0, usedFmt: m[2]+' GB', totalFmt: m[3]+' GB'});
+            }
+        }
+    }
+    // ── 尝试 Linux df -h 格式: /dev/sda1  50G  20G  28G  42% /
+    if (disks.length === 0 && (!isWin || isWin === undefined)) {
+        const lines = output.split('\n');
+        for (const line of lines) {
+            // 匹配 /dev/* 或 tmpfs 开头的行
+            if (line.match(/^(\/dev\/|tmpfs|overlay)/)) {
+                const parts = line.trim().split(/\s+/);
+                if (parts.length >= 6 && parts[4].endsWith('%')) {
+                    // parts[0]=设备, parts[1]=总大小, parts[2]=已用, parts[3]=可用, parts[4]=使用率%, parts[5]=挂载点
+                    const mount = parts[5] || parts[0];
+                    const name = mount === '/' ? '根分区 /' : mount.length > 20 ? mount.substring(0, 18) + '…' : mount;
+                    disks.push({
+                        name: name,
+                        used: 0, total: 0,
+                        pct: parseInt(parts[4]) || 0,
+                        usedFmt: parts[2], totalFmt: parts[1]
+                    });
+                } else if (parts.length >= 5 && parts[3].endsWith('%')) {
+                    // 部分系统 df 输出可能少一列
+                    const mount = parts[4] || parts[0];
+                    const name = mount === '/' ? '根分区 /' : mount.length > 20 ? mount.substring(0, 18) + '…' : mount;
+                    disks.push({
+                        name: name,
+                        used: 0, total: 0,
+                        pct: parseInt(parts[3]) || 0,
+                        usedFmt: parts[1], totalFmt: parts[0]
+                    });
+                }
+            }
+        }
+    }
+    if (disks.length === 0) return '<pre class="small p-2 bg-light rounded mb-0">' + escapeHtml(output) + '</pre>';
+
+    let html = '';
+    disks.forEach(d => {
+        const c = d.pct > 90 ? 'danger' : d.pct > 70 ? 'warning' : 'success';
+        html += `<div class="mb-2">
+            <div class="d-flex justify-content-between small mb-1"><strong>${d.name}</strong><span class="text-${c}">${d.pct.toFixed(1)}%</span></div>
+            <div class="progress" style="height:8px;"><div class="progress-bar bg-${c}" style="width:${d.pct}%;"></div></div>
+            <div class="d-flex justify-content-between small text-muted mt-1"><span>已用 ${d.usedFmt}</span><span>共 ${d.totalFmt}</span></div>
+        </div>`;
+    });
+    return html;
+}
+
+// ═══════════════════════════════════════════════
+//  CPU 渲染（环形仪表盘 — Win/Linux 统一）
+// ═══════════════════════════════════════════════
+function renderCpu(output, isWin) {
+    // ── 先尝试 Windows 格式：LoadPercentage= + 进程列表
+    const wm = output.match(/LoadPercentage=(\d+)/);
+    if (wm || isWin === true) {
+        const pct = wm ? parseInt(wm[1]) : null;
+        if (pct === null && isWin === undefined) { isWin = false; }
+        else {
+            const procLines = [];
+            const procSection = output.split('---\n')[1] || '';
+            const lines = procSection.split('\n');
+            for (const line of lines) {
+                const parts = line.trim().split(/\s+/);
+                if (parts.length >= 2) {
+                    const name = parts[0];
+                    const cpuSec = parseFloat(parts[1]);
+                    if (!isNaN(cpuSec) && name) procLines.push({name, cpu: cpuSec});
+                }
+            }
+            return buildCpuHtml(pct, procLines, '秒');
+        }
+    }
+
+    // ── Linux 格式：uptime + top 输出
+    {
+        // 解析 load average
+        const lm = output.match(/load average:\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)/);
+        const l1 = lm ? parseFloat(lm[1]) : null;
+        const l2 = lm ? parseFloat(lm[2]) : null;
+        const l3 = lm ? parseFloat(lm[3]) : null;
+
+        // 解析 %Cpu(s): 或 %CPU: 行 → CPU使用率 = 100 - idle
+        const cm = output.match(/%Cpu(?:\(s\))?:\s*(?:[\d.]+\s*\w+,?\s*)*?([\d.]+)\s*id/);
+        let cpuPct = cm ? Math.round(100 - parseFloat(cm[1])) : null;
+
+        // 如果没解析到 %Cpu，用 load / cores 估算
+        if (cpuPct === null && l1 !== null) {
+            const cores = navigator.hardwareConcurrency || 4;
+            cpuPct = Math.min(100, Math.round(l1 / cores * 100));
+        }
+
+        // 解析 top 进程列表（--- 之后，跳过 PID 表头行）
+        const procLines = [];
+        const procSection = output.split('---\n')[1] || '';
+        // 找到 PID 表头行之后的内容
+        const pidIdx = procSection.indexOf('PID');
+        if (pidIdx >= 0) {
+            const afterHeader = procSection.substring(procSection.indexOf('\n', pidIdx) + 1);
+            const lines = afterHeader.split('\n');
+            for (const line of lines) {
+                const parts = line.trim().split(/\s+/);
+                // top 输出格式: PID USER PR NI VIRT RES SHR S %CPU %MEM TIME+ COMMAND
+                // 至少需要 PID + COMMAND + %CPU，即至少 9 列
+                if (parts.length >= 9) {
+                    const name = parts[parts.length - 1];  // 最后一个是 COMMAND
+                    const cpu = parseFloat(parts[8]);       // 第9列 %CPU
+                    if (!isNaN(cpu) && name && name !== 'COMMAND') {
+                        procLines.push({name, cpu});
+                    }
+                }
+            }
+        }
+
+        let html = buildCpuHtml(cpuPct, procLines, '%');
+        // 追加 load average 信息
+        if (l1 !== null) {
+            const cores = navigator.hardwareConcurrency || 4;
+            html += `<div class="row text-center small mt-2 pt-2 border-top">
+                <div class="col-4"><div class="text-muted">1 分钟负载</div><strong class="text-${l1 > cores*0.8 ? 'danger' : l1 > cores*0.5 ? 'warning' : 'success'}">${l1.toFixed(2)}</strong></div>
+                <div class="col-4"><div class="text-muted">5 分钟负载</div><strong class="text-${l2 > cores*0.8 ? 'danger' : l2 > cores*0.5 ? 'warning' : 'success'}">${l2.toFixed(2)}</strong></div>
+                <div class="col-4"><div class="text-muted">15 分钟负载</div><strong class="text-${l3 > cores*0.8 ? 'danger' : l3 > cores*0.5 ? 'warning' : 'success'}">${l3.toFixed(2)}</strong></div>
+            </div>`;
+        }
+        return html || '<pre class="small p-2 bg-light rounded mb-0">' + escapeHtml(output) + '</pre>';
+    }
+}
+
+// ═══════════════════════════════════════════════
+//  CPU HTML 构建（Win/Linux 共用）
+// ═══════════════════════════════════════════════
+function buildCpuHtml(pct, procLines, procUnit) {
+    let html = '';
+    if (pct !== null && !isNaN(pct)) {
+        const c = pct > 90 ? 'danger' : pct > 70 ? 'warning' : 'success';
+        const ringColor = pct > 90 ? '#dc3545' : pct > 70 ? '#fd7e14' : '#198754';
+        const trackColor = '#e9ecef';
+        const size = 140, stroke = 12;
+        const r = (size - stroke) / 2;
+        const circ = 2 * Math.PI * r;
+        const dashLen = circ * pct / 100;
+
+        // SVG 环形仪表盘
+        html += `<div class="text-center mb-3">
+            <div style="position:relative;display:inline-block;width:${size}px;height:${size}px;">
+                <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="transform:rotate(-90deg);">
+                    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${trackColor}" stroke-width="${stroke}"/>
+                    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${ringColor}" stroke-width="${stroke}"
+                        stroke-dasharray="${dashLen} ${circ - dashLen}" stroke-linecap="round"
+                        style="transition:stroke-dasharray 0.6s ease;">
+                        <animate attributeName="stroke-dasharray" from="0 ${circ}" to="${dashLen} ${circ - dashLen}" dur="0.8s" fill="freeze"/>
+                    </circle>
+                </svg>
+                <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;">
+                    <div style="font-size:2rem;font-weight:800;line-height:1;" class="text-${c}">${pct}%</div>
+                    <div style="font-size:0.7rem;color:#888;">CPU 使用率</div>
+                </div>
+            </div>
+            <div class="progress mt-2 mx-auto" style="height:8px;max-width:200px;">
+                <div class="progress-bar bg-${c}" style="width:${pct}%;"></div>
+            </div>
+        </div>`;
+
+        const cores = navigator.hardwareConcurrency || 4;
+        html += `<div class="row text-center small mb-2">
+            <div class="col-4"><div class="text-muted">逻辑核心</div><strong>${cores} 核</strong></div>
+            <div class="col-4"><div class="text-muted">当前负载</div><strong class="text-${c}">${pct}%</strong></div>
+            <div class="col-4"><div class="text-muted">健康状态</div><strong class="text-${c}">${pct > 90 ? '⚠ 繁忙' : pct > 70 ? '⚡ 偏高' : '✓ 正常'}</strong></div>
+        </div>`;
+    }
+
+    if (procLines.length > 0) {
+        const maxCpu = Math.max(...procLines.map(p => p.cpu), 0.01);
+        html += '<div class="mt-2"><div class="small fw-bold text-muted mb-1">🔝 占用 CPU 最高的进程</div>';
+        html += '<div class="list-group list-group-flush small" style="max-height:260px;overflow-y:auto;">';
+        procLines.slice(0, 10).forEach((p, i) => {
+            const barPct = Math.round(p.cpu / maxCpu * 100);
+            const barC = barPct > 80 ? 'bg-danger' : barPct > 50 ? 'bg-warning' : 'bg-secondary';
+            html += `<div class="list-group-item py-1 px-2 d-flex align-items-center gap-2" style="border:none;">
+                <span class="text-muted" style="width:20px;font-size:0.7rem;">${i+1}</span>
+                <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</span>
+                <span style="width:70px;text-align:right;font-size:0.75rem;" class="text-muted">${p.cpu.toFixed(1)} ${procUnit || ''}</span>
+                <div class="progress flex-shrink-0" style="width:50px;height:4px;">
+                    <div class="progress-bar ${barC}" style="width:${barPct}%;"></div>
+                </div>
+            </div>`;
+        });
+        html += '</div></div>';
+    }
+    return html || '';
+}
+
+// ═══════════════════════════════════════════════
+//  系统错误日志渲染
+// ═══════════════════════════════════════════════
+function renderOsErrors(output) {
+    const lines = output.split('\n').filter(l => l.trim());
+    if (lines.length === 0) return '<div class="text-muted small text-center py-2">暂无系统错误</div>';
+    // 分组：每行错误为一条记录
+    const entries = [];
+    let current = null;
+    for (const line of lines) {
+        const t = line.trim();
+        const dateMatch = t.match(/^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/);
+        if (dateMatch) {
+            if (current) entries.push(current);
+            current = { time: dateMatch[1], msg: t.substring(dateMatch[0].length).trim() };
+        } else if (current) {
+            current.msg += ' ' + t;
+        } else {
+            current = { time: '', msg: t };
+        }
+    }
+    if (current) entries.push(current);
+
+    let html = '';
+    entries.slice(0, 30).forEach((e, i) => {
+        const shortMsg = e.msg.length > 150 ? e.msg.substring(0, 150) + '…' : e.msg;
+        html += `<div class="small mb-1 p-1 border-bottom">
+            ${e.time ? '<span class="text-muted me-1">🕐 ' + e.time + '</span>' : ''}
+            <span>${escapeHtml(shortMsg)}</span>
+        </div>`;
+    });
+    if (entries.length > 30) html += '<div class="text-muted small text-center">… 仅显示最近 30 条，共 ' + entries.length + ' 条</div>';
+    return html || '<div class="text-muted small text-center py-2">暂无系统错误</div>';
+}
+
+// ═══════════════════════════════════════════════
+//  版本信息渲染
+// ═══════════════════════════════════════════════
+function renderVersion(result) {
+    const rows = (result.rows || []).filter(r => String(r[0]||'').trim().toUpperCase() !== 'VERSION');
+    if (rows.length === 0) return '<div class="text-muted small text-center py-2">暂无数据</div>';
+    let pairs = [];
+    rows.forEach(row => {
+        const text = String(row[0] || '');
+        // 尝试按常见分隔符拆分 key: value
+        const m = text.match(/^(.+?)\s*[:：=]\s*(.+)$/);
+        if (m) {
+            pairs.push({key: zhCol(m[1]) || m[1], val: m[2]});
+        } else {
+            pairs.push({key: '', val: text});
+        }
+    });
+    if (pairs.length === 1 && !pairs[0].key) {
+        // 单行版本号
+        return `<div class="text-center py-2"><span style="font-size:1.5rem;font-weight:700;" class="text-primary">${escapeHtml(pairs[0].val)}</span></div>`;
+    }
+    let html = '<table class="table table-sm table-borderless small mb-0">';
+    pairs.forEach(p => {
+        html += `<tr><td class="text-muted text-end" style="width:40%;">${p.key || ''}</td><td class="fw-bold">${escapeHtml(p.val)}</td></tr>`;
+    });
+    html += '</table>';
+    return html;
+}
+
+// ═══════════════════════════════════════════════
+//  主渲染入口
+// ═══════════════════════════════════════════════
+function renderResults(data) {
+    let html = '';
+
+    // ── 数据库查询结果 ──
+    if (data.db_queries) {
+        for (const [cat, queries] of Object.entries(data.db_queries)) {
+            for (const [qname, result] of Object.entries(queries)) {
+                const qlabel = queryLabels[qname] || qname.replace(/_/g, ' ');
+
+                // 版本信息
+                if (qname === 'version' || qname === 'version_detail') {
+                    html += renderCard(qlabel, 'info-circle', renderVersion(result));
+                }
+                // 大数字卡片
+                else if (qname === 'session_count' || qname === 'deadlock_count' || qname === 'non_auto_commit' || qname === 'idle_non_auto_commit') {
+                    const val = result.rows && result.rows[0] ? parseInt(result.rows[0][0]) || 0 : 0;
+                    let color = 'success', icon = 'check-circle', desc = '';
+                    if (qname === 'session_count')          { color = val > 100 ? 'danger' : val > 50 ? 'warning' : 'success'; icon = 'people'; desc = '个连接'; }
+                    else if (qname === 'deadlock_count')   { color = val > 0 ? 'danger' : 'success'; icon = 'exclamation-triangle'; desc = '个死锁'; }
+                    else if (qname === 'non_auto_commit')  { color = val > 10 ? 'warning' : 'info'; icon = 'clock-history'; desc = '个非自动提交连接'; }
+                    else if (qname === 'idle_non_auto_commit') { color = val > 10 ? 'warning' : 'info'; icon = 'hourglass'; desc = '个空闲非自动提交连接'; }
+                    html += renderCard(qlabel, icon,
+                        '<div class="text-center py-2"><span style="font-size:2.5rem;font-weight:700;" class="text-' + color + '">' + val + '</span><div class="small text-muted">' + desc + '</div></div>');
+                }
+                // 数据文件信息
+                else if (qname === 'datafile_info' && result.rows) {
+                    let t = '<table class="table table-sm table-hover small mb-0"><thead class="table-light"><tr><th>表空间</th><th>文件名</th><th>当前大小</th><th>空闲大小</th><th>使用率</th></tr></thead><tbody>';
+                    result.rows.forEach(row => {
+                        const pctStr = String(row[5] || '').replace('%','');
+                        const pct = parseFloat(pctStr) || 0;
+                        const c = pct > 80 ? 'danger' : pct > 60 ? 'warning' : 'success';
+                        const bar = `<div class="progress" style="height:5px;"><div class="progress-bar bg-${c}" style="width:${pct}%;"></div></div><small class="text-${c}">${pct.toFixed(1)}%</small>`;
+                        t += '<tr><td>' + escapeHtml(row[1]||'') + '</td><td class="small">' + escapeHtml((row[2]||'').split('/').pop().split('\\').pop()) + '</td><td>' + fmtVal('size', row[3]) + '</td><td>' + fmtVal('size', row[4]) + '</td><td>' + bar + '</td></tr>';
+                    });
+                    t += '</tbody></table>';
+                    html += renderCard(qlabel, 'hdd', t, result.rows.length + ' 个文件');
+                }
+                // 慢SQL
+                else if (qname === 'slow_sql' && result.rows) {
+                    let t = '<table class="table table-sm small mb-0"><thead class="table-warning"><tr><th style="width:70px;">⏱ 耗时</th><th>📝 SQL 语句</th></tr></thead><tbody>';
+                    result.rows.forEach(row => {
+                        const cost = parseFloat(row[0]) || 0;
+                        const costColor = cost > 10 ? 'danger' : cost > 2 ? 'warning' : 'secondary';
+                        t += '<tr><td class="text-' + costColor + ' fw-bold">' + cost.toFixed(2) + ' 秒</td><td class="small"><code style="font-size:0.75rem;">' + escapeHtml(String(row[1]||'').substring(0, 300)) + '</code></td></tr>';
+                    });
+                    t += '</tbody></table>';
+                    html += renderCard(qlabel, 'clock-history', t, result.rows.length + ' 条');
+                }
+                // 默认表格
+                else {
+                    const rowCount = (result.rows && result.rows.length) || 0;
+                    html += renderCard(qlabel, 'table', renderTable(result), rowCount > 0 ? rowCount + ' 行' : '');
+                }
+            }
+        }
+    }
+
+    // ── 操作系统信息 ──
+    if (data.os_info) {
+        // 判断是否为 Windows（检测所有可用数据）
+        const allOsOutput = Object.values(data.os_info || {}).map(r => r.output || '').join('\n');
+        const isWin = allOsOutput.includes('TotalMB=') || allOsOutput.includes('LoadPercentage=') || allOsOutput.includes('GB/');
+
+        // 1) 内存 (总是先显示)
+        if (data.os_info.memory) {
+            const out = data.os_info.memory.output || '';
+            if (out) html += renderCard(osCheckLabels['memory'] || '内存', 'memory', renderMemory(out, isWin));
+        }
+        // 2) CPU
+        if (data.os_info.cpu) {
+            const out = data.os_info.cpu.output || '';
+            if (out) html += renderCard(osCheckLabels['cpu'] || 'CPU', 'cpu', renderCpu(out, isWin));
+        }
+        // 3) 磁盘
+        if (data.os_info.disk) {
+            const out = data.os_info.disk.output || '';
+            if (out) html += renderCard(osCheckLabels['disk'] || '磁盘', 'hdd-stack', renderDisk(out, isWin));
+        }
+        // 4) 其他 OS 检查项
+        for (const [check, result] of Object.entries(data.os_info)) {
+            if (check === 'memory' || check === 'cpu' || check === 'disk') continue;
+            const clabel = osCheckLabels[check] || check.replace(/_/g, ' ');
+            const output = result.output || '';
+            const err = result.error || '';
+
+            if (check === 'os_errors' && output) {
+                html += renderCard(clabel, 'exclamation-triangle', renderOsErrors(output));
+            } else if (result.columns && result.rows && result.rows.length > 0) {
+                html += renderCard(clabel, 'grid', renderTable(result), result.rows.length + ' 行');
+            } else if (output) {
+                // 原始文本输出
+                const content = '<pre class="small p-2 bg-dark text-light rounded mb-0" style="max-height:300px;overflow:auto;font-size:0.78rem;">' + escapeHtml(output + '\n' + (err || '')) + '</pre>';
+                html += renderCard(clabel, 'terminal', content);
+            }
+        }
+    }
+
+    // ── 应用状态 ──
+    if (data.apps && data.apps.length > 0) {
+        let appHtml = '<table class="table table-sm table-hover small mb-0"><thead class="table-light"><tr><th>应用名称</th><th>运行状态</th><th>快捷操作</th></tr></thead><tbody>';
+        data.apps.forEach(app => {
+            const badge = app.running ? '<span class="badge bg-success">● 运行中</span>' : '<span class="badge bg-danger">● 已停止</span>';
+            const btns = `<div class="btn-group btn-group-sm">
+                <button class="btn btn-outline-success btn-sm py-0 px-1" onclick="appControl('${SERVER_ID}','${app.name}','start')" title="启动"><i class="bi bi-play-fill"></i></button>
+                <button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="appControl('${SERVER_ID}','${app.name}','stop')" title="停止"><i class="bi bi-stop-fill"></i></button>
+                <button class="btn btn-outline-warning btn-sm py-0 px-1" onclick="appControl('${SERVER_ID}','${app.name}','restart')" title="重启"><i class="bi bi-arrow-repeat"></i></button>
+                <button class="btn btn-outline-info btn-sm py-0 px-1" onclick="appControl('${SERVER_ID}','${app.name}','status')" title="刷新状态"><i class="bi bi-arrow-clockwise"></i></button>
+            </div>`;
+            appHtml += '<tr><td><strong>' + escapeHtml(app.name) + '</strong></td><td id="app-status-' + app.name + '">' + badge + '</td><td>' + btns + '</td></tr>';
+        });
+        appHtml += '</tbody></table>';
+        html += renderCard('📦 应用监控', 'boxes', appHtml, data.apps.length + ' 个应用');
+    }
+
+    return html || '<div class="text-center p-4 text-muted"><i class="bi bi-inbox" style="font-size:2rem;"></i><p class="mt-2">采集完成，暂无展示数据</p></div>';
+}
+
+// ═══════════════════════════════════════════════
+//  公用辅助函数
+// ═══════════════════════════════════════════════
+function showStatus(msg, type) {
+    const el = document.getElementById('collectStatus');
+    const errEl = document.getElementById('errorMsg');
+    if (!el) return;
+    if (type === 'error') {
+        errEl.textContent = msg;
+        errEl.style.display = '';
+        el.style.display = 'none';
+    } else if (type === 'info') {
+        el.textContent = msg;
+        el.style.display = '';
+        errEl.style.display = 'none';
+    } else if (type === 'success') {
+        el.textContent = '✅ ' + msg;
+        el.style.display = '';
+        errEl.style.display = 'none';
+        setTimeout(() => { el.style.display = 'none'; }, 3000);
+    }
+}
+
+async function collectAll() {
+    showStatus('正在采集全部数据...', 'info');
+    try {
+        const data = await apiFetch('/api/servers/' + SERVER_ID + '/collect', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        });
+        if (data.error) {
+            showStatus(data.error, 'error');
+        } else {
+            document.getElementById('dataContainer').innerHTML = renderResults(data);
+            showStatus('采集完成 - ' + data.timestamp, 'success');
+            loadTrends();
+        }
+    } catch (e) {
+        showStatus(e.message, 'error');
+    }
+}
+
+async function collectCategory(cat) {
+    showStatus('正在采集 ' + cat + ' ...', 'info');
+    try {
+        const data = await apiFetch('/api/servers/' + SERVER_ID + '/collect-partial', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({categories: [cat], os_checks: []})
+        });
+        if (data.error) {
+            showStatus(data.error, 'error');
+        } else {
+            document.getElementById('dataContainer').innerHTML = renderResults(data);
+            showStatus('采集完成', 'success');
+        }
+    } catch (e) {
+        showStatus(e.message, 'error');
+    }
+}
+
+async function collectOsCheck(check) {
+    showStatus('正在采集 ' + check + ' ...', 'info');
+    try {
+        const data = await apiFetch('/api/servers/' + SERVER_ID + '/collect-partial', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({categories: [], os_checks: [check]})
+        });
+        if (data.error) {
+            showStatus(data.error, 'error');
+        } else {
+            document.getElementById('dataContainer').innerHTML = renderResults(data);
+            showStatus('采集完成', 'success');
+        }
+    } catch (e) {
+        showStatus(e.message, 'error');
+    }
+}
+
+function toggleAutoRefresh() {
+    autoRefreshEnabled = !autoRefreshEnabled;
+    const label = document.getElementById('autoRefreshLabel');
+    if (autoRefreshEnabled) {
+        label.textContent = '开';
+        autoRefreshTimer = setInterval(collectAll, 30000);
+        showStatus('自动刷新已开启 (30秒间隔)', 'info');
+    } else {
+        label.textContent = '关';
+        if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+        showStatus('自动刷新已关闭', 'info');
+    }
+}
+
+async function appControl(serverId, appName, action) {
+    const statusCell = document.getElementById('app-status-' + appName);
+    try {
+        const result = await apiFetch('/api/servers/' + serverId + '/app-control', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({action: action, app: appName})
+        });
+        if (result.running !== undefined) {
+            statusCell.innerHTML = result.running ? '<span class="badge bg-success">运行中</span>' : '<span class="badge bg-danger">已停止</span>';
+        }
+        showStatus(result.msg || result.error || '操作完成', result.ok ? 'success' : 'error');
+    } catch (e) {
+        showStatus(e.message, 'error');
+    }
+}
+
+// ── CSV export ─────────────────────────────────────────
+function exportCSV() {
+    window.open('/api/servers/' + SERVER_ID + '/export', '_blank');
+}
+
+// ── Chart.js 多指标趋势图 ──────────────────────────────
+let trendChart = null;
+async function loadTrends() {
+    try {
+        const hours = document.getElementById('trendHours')?.value || 24;
+        const data = await apiFetch('/api/trends/' + SERVER_ID + '?hours=' + hours);
+        if (!data || data.length < 2) return;
+        document.getElementById('trendPanel').style.display = '';
+        const labels = data.map(p => p.ts);
+        const cpuData = data.map(p => p.cpu_pct ?? null);
+        const memData = data.map(p => p.mem_pct ?? null);
+        const sessData = data.map(p => p.sessions ?? null);
+        const slowData = data.map(p => p.slow_sql_count ?? null);
+
+        if (trendChart) trendChart.destroy();
+        const ctx = document.getElementById('trendChart').getContext('2d');
+        const datasets = [];
+        if (cpuData.some(v => v !== null)) datasets.push({label:'CPU %',data:cpuData,borderColor:'#dc3545',backgroundColor:'rgba(220,53,69,0.1)',tension:0.3,fill:false,pointRadius:0,yAxisID:'y'});
+        if (memData.some(v => v !== null)) datasets.push({label:'内存 %',data:memData,borderColor:'#fd7e14',backgroundColor:'rgba(253,126,20,0.1)',tension:0.3,fill:false,pointRadius:0,yAxisID:'y'});
+        if (sessData.some(v => v !== null)) datasets.push({label:'连接数',data:sessData,borderColor:'#2563EB',backgroundColor:'rgba(37,99,235,0.1)',tension:0.3,fill:false,pointRadius:0,yAxisID:'y1'});
+        if (slowData.some(v => v !== null)) datasets.push({label:'慢SQL',data:slowData,borderColor:'#6f42c1',backgroundColor:'rgba(111,66,193,0.1)',tension:0.3,fill:false,pointRadius:0,yAxisID:'y1',borderDash:[4,2]});
+
+        trendChart = new Chart(ctx, {
+            type: 'line',
+            data: { labels, datasets },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: { legend: { position: 'top', labels: { usePointStyle: true, padding: 15 } } },
+                scales: {
+                    y: { type: 'linear', position: 'left', title: { display: true, text: '%' }, min: 0, max: 100, grid: { color: 'rgba(0,0,0,0.06)' } },
+                    y1: { type: 'linear', position: 'right', title: { display: true, text: '数量' }, min: 0, grid: { display: false } },
+                    x: { ticks: { maxTicksLimit: 12, maxRotation: 0 } }
+                }
+            }
+        });
+    } catch(e) {}
+}
+
+
+{% endraw %}
+</script>
+{% endblock %}

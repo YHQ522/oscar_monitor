@@ -1,0 +1,16 @@
+{
+  "templates": {
+    "nginx": {"name":"Nginx","svc_mgr":"systemctl","svc_name":"nginx","group":"Web服务","start_cmd":"systemctl start nginx","stop_cmd":"systemctl stop nginx","health_url":"http://localhost:80/","port":80},
+    "tomcat": {"name":"Tomcat","svc_mgr":"systemctl","svc_name":"tomcat","group":"Web服务","start_cmd":"systemctl start tomcat","stop_cmd":"systemctl stop tomcat","health_url":"http://localhost:8080/","port":8080},
+    "redis": {"name":"Redis","svc_mgr":"systemctl","svc_name":"redis","group":"缓存服务","start_cmd":"systemctl start redis","stop_cmd":"systemctl stop redis","health_url":"","port":6379},
+    "postgresql": {"name":"PostgreSQL","svc_mgr":"systemctl","svc_name":"postgresql","group":"数据库服务","start_cmd":"systemctl start postgresql","stop_cmd":"systemctl stop postgresql","health_url":"","port":5432},
+    "nodejs": {"name":"Node.js (PM2)","svc_mgr":"script","svc_name":"pm2","group":"Web服务","start_cmd":"pm2 start app.js","stop_cmd":"pm2 stop app.js","health_url":"http://localhost:3000/","port":3000},
+    "docker": {"name":"Docker 容器","svc_mgr":"script","svc_name":"docker","group":"容器服务","start_cmd":"docker start CONTAINER_NAME","stop_cmd":"docker stop CONTAINER_NAME","health_url":"","port":0},
+    "elasticsearch": {"name":"Elasticsearch","svc_mgr":"systemctl","svc_name":"elasticsearch","group":"数据服务","start_cmd":"systemctl start elasticsearch","stop_cmd":"systemctl stop elasticsearch","health_url":"http://localhost:9200/","port":9200},
+    "kafka": {"name":"Kafka","svc_mgr":"systemctl","svc_name":"kafka","group":"消息服务","start_cmd":"systemctl start kafka","stop_cmd":"systemctl stop kafka","health_url":"","port":9092},
+    "mysql": {"name":"MySQL","svc_mgr":"systemctl","svc_name":"mysqld","group":"数据库服务","start_cmd":"systemctl start mysqld","stop_cmd":"systemctl stop mysqld","health_url":"","port":3306},
+    "nginx-win": {"name":"Nginx (Win)","svc_mgr":"sc","svc_name":"nginx","group":"Web服务","start_cmd":"sc start nginx","stop_cmd":"sc stop nginx","health_url":"http://localhost:80/","port":80,"os":"windows"},
+    "iis": {"name":"IIS","svc_mgr":"sc","svc_name":"W3SVC","group":"Web服务","start_cmd":"sc start W3SVC","stop_cmd":"sc stop W3SVC","health_url":"http://localhost:80/","port":80,"os":"windows"},
+    "tomcat-win": {"name":"Tomcat (Win)","svc_mgr":"sc","svc_name":"Tomcat9","group":"Web服务","start_cmd":"sc start Tomcat9","stop_cmd":"sc stop Tomcat9","health_url":"http://localhost:8080/","port":8080,"os":"windows"}
+  }
+}

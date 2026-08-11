@@ -1,0 +1,514 @@
+{% extends "base.html" %}
+{% block title %}服务管理 - 管控平台{% endblock %}
+{% block head %}
+<style>
+.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+.sortable:hover { color: var(--primary) !important; }
+.sort-icon { font-size: 0.65rem; opacity: 0.4; margin-left: 2px; }
+.sort-icon.active { opacity: 1; color: var(--primary); }
+.accordion-button { font-size: 0.82rem; font-weight: 600; padding: 0.5rem 0.75rem; }
+.accordion-button:not(.collapsed) { background: rgba(99,102,241,0.06); color: var(--primary-dark); }
+.accordion-body { padding: 0.75rem; }
+.cat-tag {
+    display: inline-block; font-size: 0.7rem; padding: 2px 8px;
+    border-radius: 10px; margin: 1px 3px 1px 0; font-weight: 500;
+}
+.cat-tag.db { background: rgba(99,102,241,0.08); color: var(--primary); }
+.cat-tag.os { background: rgba(5,150,105,0.08); color: #059669; }
+#batchBar {
+    display: none; position: sticky; top: 0; z-index: 10;
+    background: rgba(99,102,241,0.06); border: 1px solid rgba(99,102,241,0.2);
+    border-radius: 10px; padding: 8px 14px; margin-bottom: 8px;
+    backdrop-filter: blur(10px);
+}
+/* 编辑向导 */
+#editModal .steps { display:flex; gap:0; margin-bottom:1rem; }
+#editModal .step { flex:1; text-align:center; position:relative; }
+#editModal .step::after { content:''; position:absolute; top:12px; left:50%; width:100%; height:2px; background:var(--border-solid); z-index:0; }
+#editModal .step:last-child::after { display:none; }
+#editModal .step-circle { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; border-radius:50%; background:rgba(99,102,241,0.08); color:var(--text-muted); font-weight:700; font-size:0.72rem; position:relative; z-index:1; transition:all .3s; }
+#editModal .step.active .step-circle { background:var(--primary); color:#fff; box-shadow:0 0 0 3px rgba(99,102,241,0.15); }
+#editModal .step.done .step-circle { background:#059669; color:#fff; }
+#editModal .step.done::after { background:#059669; }
+#editModal .step.skipped .step-circle { background:#94A3B8; color:#fff; }
+#editModal .step.skipped::after { background:#94A3B8; }
+#editModal .step-label { font-size:0.62rem; color:var(--text-muted); margin-top:3px; }
+#editModal .step.active .step-label, #editModal .step.done .step-label { color:var(--text); font-weight:600; }
+#editModal .step-panel { display:none; }
+#editModal .step-panel.active { display:block; animation:fadeSlideIn .3s ease; }
+#editModal .nav-btns { display:flex; justify-content:space-between; }
+@keyframes fadeSlideIn { from{opacity:0;transform:translateY(8px);} to{opacity:1;transform:translateY(0);} }
+/* 表格毛玻璃 */
+.svr-table { background: var(--surface); border-radius: var(--radius); overflow: hidden; }
+.svr-table thead th { background: rgba(99,102,241,0.06); color: var(--text); font-weight: 600; font-size: 0.78rem; border: none; }
+.svr-table tbody td { vertical-align: middle; border-color: rgba(99,102,241,0.06); }
+.svr-table tbody tr:hover { background: rgba(99,102,241,0.03); }
+[data-bs-theme="dark"] .svr-table thead th { background: rgba(99,102,241,0.12); }
+[data-bs-theme="dark"] .svr-table tbody tr:hover { background: rgba(99,102,241,0.06); }
+/* 响应式：小屏隐藏次要列 */
+@media (max-width: 768px) {
+    .col-ssh, .col-db { display: none; }
+    .col-name { width: auto !important; }
+    .col-items { width: auto !important; }
+    .col-act { width: 70px !important; }
+}
+</style>
+{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h4 class="mb-0"><i class="bi bi-hdd-rack"></i> 服务管理</h4>
+    <div class="d-flex align-items-center gap-2">
+        <input type="text" class="form-control form-control-sm" id="searchBox" placeholder="搜索..." oninput="filterTable()" style="width:150px;">
+        {% if 'servers_edit' in user_perms or is_admin %}
+        <a href="/servers/add" class="btn btn-primary btn-sm"><i class="bi bi-plus-circle"></i> 添加</a>
+        {% endif %}
+    </div>
+</div>
+
+{% if servers|length == 0 %}
+<div class="card"><div class="card-body text-center py-4">
+    <div class="mb-2"><span class="rounded-circle d-inline-flex align-items-center justify-content-center" style="width:48px;height:48px;background:rgba(99,102,241,0.08);"><i class="bi bi-server fs-5" style="color:var(--primary);"></i></span></div>
+    <div class="text-muted small">尚未配置任何服务</div>
+    {% if 'servers_edit' in user_perms or is_admin %}<a href="/servers/add" class="btn btn-primary btn-sm mt-2">添加第一台服务</a>{% endif %}
+</div></div>
+{% else %}
+<div id="batchBar">
+    <span class="small fw-bold me-2" id="batchCount">已选 0 台</span>
+    <button class="btn btn-outline-danger btn-sm" onclick="batchDelete()"><i class="bi bi-trash"></i> 批量删除</button>
+    <button class="btn btn-outline-secondary btn-sm ms-auto" onclick="toggleSelectAll()">全选/取消</button>
+</div>
+<div class="card" style="overflow:hidden;">
+<div class="table-responsive">
+    <table class="table table-sm table-hover svr-table mb-0">
+        <thead>
+            <tr>
+                <th style="width:32px;"><input type="checkbox" id="selectAllCb" onchange="onSelectAll(this)" title="全选"></th>
+                <th class="col-name sortable" onclick="sortTable(1)">名称 <span class="sort-icon" id="sortIcon1"></span></th>
+                <th class="col-ssh sortable d-none d-md-table-cell" onclick="sortTable(2)">SSH <span class="sort-icon" id="sortIcon2"></span></th>
+                <th class="col-db sortable d-none d-md-table-cell" onclick="sortTable(3)">数据库 <span class="sort-icon" id="sortIcon3"></span></th>
+                <th class="col-items sortable" onclick="sortTable(4)">采集项 <span class="sort-icon" id="sortIcon4"></span></th>
+                <th class="col-act" style="width:90px;">操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in servers %}
+            {% set db_type = s.db_type or 'oscar' %}
+            {% set db_labels = {'oscar':'Oscar','mysql':'MySQL','postgresql':'PG','oracle':'Oracle'} %}
+            <tr data-search="{{ s.name }} {{ s.ssh_host }} {{ s.db_host }} {{ s.db_name }} {{ s.db_user }}">
+                <td><input type="checkbox" class="row-cb" value="{{ s.id }}" onchange="onRowCheck()"></td>
+                <td class="col-name">
+                    <strong>{% if s.os_type == 'windows' %}🪟{% else %}🐧{% endif %} {{ s.name or s.ssh_host }}</strong>
+                    {% if s.enabled_categories or s.enabled_os_checks %}
+                    <span class="cat-tag db ms-1" style="font-size:0.6rem;">{{ db_labels.get(db_type, db_type) }}</span>
+                    {% endif %}
+                </td>
+                <td class="col-ssh small d-none d-md-table-cell">{{ s.ssh_user }}@{{ s.ssh_host }}:{{ s.ssh_port }}</td>
+                <td class="col-db small d-none d-md-table-cell">
+                    {% if s.enabled_categories or s.enabled_os_checks %}
+                    {{ s.db_user }}@{{ s.db_host }}:{{ s.db_port }}/{{ s.db_name }}
+                    {% else %}<span class="text-muted">未配置</span>{% endif %}
+                </td>
+                <td class="col-items small">
+                    {% set db_cats = s.enabled_categories or [] %}
+                    {% set os_items = s.enabled_os_checks or [] %}
+                    {% if db_cats|length + os_items|length > 0 %}
+                    <span class="cat-tag" style="cursor:help;background:rgba(99,102,241,0.06);"
+                       title="数据库: {% for c in db_cats %}{{ query_sets.get(c,{}).label or c }}{% if not loop.last %}, {% endif %}{% endfor %}&#10;系统: {% for o in os_items %}{{ os_check_labels.get(o,o) }}{% if not loop.last %}, {% endif %}{% endfor %}">
+                        {% if db_cats|length > 0 %}{{ db_cats|length }} 数据库{% if os_items|length > 0 %} · {% endif %}{% endif %}
+                        {% if os_items|length > 0 %}{{ os_items|length }} 系统{% endif %}
+                        <i class="bi bi-info-circle ms-1" style="font-size:0.6rem;opacity:0.4;"></i>
+                    </span>
+                    {% else %}<span class="text-muted">未配置</span>{% endif %}
+                </td>
+                <td class="col-act" style="white-space:nowrap;">
+                    {% if 'servers_edit' in user_perms or is_admin %}
+                    <button class="btn btn-outline-secondary btn-sm" onclick="openEdit('{{ s.id }}')" title="编辑"><i class="bi bi-pencil"></i></button>
+                    <button class="btn btn-outline-danger btn-sm" onclick="deleteServer('{{ s.id }}')" title="删除"><i class="bi bi-trash"></i></button>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+</div>
+{% endif %}
+
+<div class="modal fade" id="editModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-pencil"></i> <span id="editStepTitle">编辑服务</span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="steps" id="editSteps">
+                    <div class="step active" data-step="1"><div class="step-circle">1</div><div class="step-label">环境</div></div>
+                    <div class="step" data-step="2"><div class="step-circle">2</div><div class="step-label">SSH</div></div>
+                    <div class="step" data-step="3"><div class="step-circle">3</div><div class="step-label">采集项</div></div>
+                    <div class="step" data-step="4"><div class="step-circle">4</div><div class="step-label">数据库</div></div>
+                    <div class="step" data-step="5"><div class="step-circle">5</div><div class="step-label">应用</div></div>
+                    <div class="step" data-step="6"><div class="step-circle">6</div><div class="step-label">保存</div></div>
+                </div>
+                <form id="editForm"><input type="hidden" id="editId">
+                <div class="step-panel active" data-step="1">
+                    <div class="row g-2">
+                        <div class="col-md-6"><label class="form-label small required">目标操作系统</label><select class="form-select form-select-sm" id="editOsType" onchange="onEditOsChange()"><option value="linux">Linux</option><option value="windows">Windows</option></select></div>
+                        <div class="col-md-6"><label class="form-label small">显示名称</label><input class="form-control form-control-sm" id="editName"></div>
+                        <div class="col-md-6"><label class="form-label small">自动刷新间隔(秒)</label><input class="form-control form-control-sm" id="editAutoRefresh" type="number" min="0" step="10"></div>
+                    </div>
+                </div>
+                <div class="step-panel" data-step="2">
+                    <div class="row g-2">
+                        <div class="col-md-6"><label class="form-label small required">远程主机</label><input class="form-control form-control-sm" id="editSshHost"></div>
+                        <div class="col-md-3"><label class="form-label small required">端口</label><input class="form-control form-control-sm" id="editSshPort" type="number"></div>
+                        <div class="col-md-4"><label class="form-label small required">登录用户</label><input class="form-control form-control-sm" id="editSshUser"></div>
+                        <div class="col-md-5"><label class="form-label small required">登录密码</label><input class="form-control form-control-sm" id="editSshPass" type="password"></div>
+                    </div>
+                </div>
+                <div class="step-panel" data-step="3">
+                    <div class="border rounded p-2 mb-2">
+                        <div class="d-flex justify-content-between align-items-center mb-1"><span class="small fw-bold">数据库监控</span><div class="form-check mb-0"><input class="form-check-input" type="checkbox" id="editCatAll" onchange="toggleEditCats()"><label class="form-check-label small" for="editCatAll">全选</label></div></div>
+                        <div id="editDbCheckItems" class="row g-1">
+                            {% for k, v in query_sets.items() %}<div class="col-auto"><div class="form-check form-check-inline mb-0"><input class="form-check-input edit-cat-check" type="checkbox" value="{{ k }}" id="edit-cat-{{ k }}"><label class="form-check-label small" for="edit-cat-{{ k }}">{{ v.label }}</label></div></div>{% endfor %}
+                            <div class="col-auto"><div class="form-check form-check-inline mb-0"><input class="form-check-input edit-os-check" type="checkbox" value="install_path" id="edit-os-install_path"><label class="form-check-label small" for="edit-os-install_path">{{ os_check_labels.install_path }}</label></div></div>
+                            <div class="col-auto"><div class="form-check form-check-inline mb-0"><input class="form-check-input edit-os-check" type="checkbox" value="db_log_errors" id="edit-os-db_log_errors"><label class="form-check-label small" for="edit-os-db_log_errors">{{ os_check_labels.db_log_errors }}</label></div></div>
+                        </div>
+                    </div>
+                    <div class="border rounded p-2">
+                        <div class="d-flex justify-content-between align-items-center mb-1"><span class="small fw-bold">操作系统监控</span><div class="form-check mb-0"><input class="form-check-input" type="checkbox" id="editOsAll" onchange="toggleEditOs()"><label class="form-check-label small" for="editOsAll">全选</label></div></div>
+                        <div id="editOsCheckItems" class="row g-1">{% for k, v in os_check_labels.items() %}{% if k not in ('install_path', 'db_log_errors') %}<div class="col-auto"><div class="form-check form-check-inline mb-0"><input class="form-check-input edit-os-check" type="checkbox" value="{{ k }}" id="edit-os-{{ k }}"><label class="form-check-label small" for="edit-os-{{ k }}">{{ v }}</label></div></div>{% endif %}{% endfor %}</div>
+                    </div>
+                </div>
+                <div class="step-panel" data-step="4">
+                    <div id="editDbForm">
+                        <div class="row g-2 mb-2">
+                            <div class="col-md-6"><label class="form-label small">数据库类型</label><select class="form-select form-select-sm" id="editDbType" onchange="onEditDbTypeChange()"><option value="oscar">Oscar (神通)</option><option value="mysql">MySQL</option><option value="postgresql">PostgreSQL</option><option value="oracle">Oracle</option></select></div>
+                            <div class="col-md-6 d-flex align-items-end"><div class="row g-2 w-100"><div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="editInControl"><label class="form-check-label small" for="editInControl">启停管控</label></div></div><div class="col-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="editPersistEnabled" onclick="return checkPersistEnabled(this)"><label class="form-check-label small" for="editPersistEnabled">持久化日志</label></div></div></div></div>
+                        </div>
+                        <div class="row g-2">
+                            <div class="col-md-4"><label class="form-label small required">数据库主机</label><input class="form-control form-control-sm" id="editDbHost"></div>
+                            <div class="col-md-2"><label class="form-label small required">端口</label><input class="form-control form-control-sm" id="editDbPort" type="number"></div>
+                            <div class="col-md-3"><label class="form-label small required">用户</label><input class="form-control form-control-sm" id="editDbUser"></div>
+                            <div class="col-md-3"><label class="form-label small required">密码</label><input class="form-control form-control-sm" id="editDbPass" type="password"></div>
+                            <div class="col-md-6"><label class="form-label small required">数据库名</label><input class="form-control form-control-sm" id="editDbName"></div>
+                            <div class="col-md-6"><label class="form-label small"><span id="editIsqlLabel">isql</span>路径</label><input class="form-control form-control-sm" id="editIsqlCmd"></div>
+                        </div>
+                    </div>
+                    <div id="editDbSkip" class="text-center py-3" style="display:none;">
+                        <p class="text-muted small mb-2">未选择数据库采集项，此步骤已跳过</p>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="editShowDb()"><i class="bi bi-plus-circle"></i> 还是要配置</button>
+                    </div>
+                </div>
+                <div class="step-panel" data-step="5">
+                    <div class="border rounded p-2 mb-2"><span class="small fw-bold">📱 应用监控 (可选)</span>
+                        <div class="d-flex gap-2 mt-1"><select class="form-select form-select-sm" id="editAppTemplate" onchange="applyTemplate('edit', this.value)" style="width:200px;"><option value="">📋 快速添加...</option></select><button type="button" class="btn btn-outline-secondary btn-sm" onclick="addAppRow('edit')"><i class="bi bi-plus"></i> 自定义</button></div>
+                        <div id="editAppList" class="mt-1"></div>
+                    </div>
+                </div>
+                <div class="step-panel" data-step="6">
+                    <div class="text-center mb-3"><p class="text-muted small">确认无误后保存修改</p></div>
+                    <div class="d-flex justify-content-end gap-1">
+                        <button type="button" class="btn btn-outline-success btn-sm" onclick="testEditConnection()"><i class="bi bi-plug"></i> 测试连接</button>
+                        <button type="button" class="btn btn-primary btn-sm" onclick="saveEdit()"><i class="bi bi-check-circle"></i> 保存</button>
+                    </div>
+                </div>
+                <div class="nav-btns mt-3">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="editBtnPrev" onclick="editGoStep(-1)" style="visibility:hidden;"><i class="bi bi-arrow-left"></i> 上一步</button>
+                    <button type="button" class="btn btn-primary btn-sm" id="editBtnNext" onclick="editGoStep(1)">下一步 <i class="bi bi-arrow-right"></i></button>
+                </div>
+                </form>
+            </div>
+            <div id="editTestResult" class="small text-break px-3 pb-2" style="max-height:100px;overflow-y:auto;"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+<script>
+let serverList = {{ servers|tojson }};
+const querySets = {{ query_sets|tojson }};
+const osCheckLabels = {{ os_check_labels|tojson }};
+const logEnabled = {{ log_enabled|tojson }};
+{% raw %}
+
+function filterTable() {
+    const q = document.getElementById('searchBox').value.toLowerCase().trim();
+    document.querySelectorAll('tbody tr').forEach(tr => {
+        const text = (tr.getAttribute('data-search') || '').toLowerCase();
+        tr.style.display = (!q || text.includes(q)) ? '' : 'none';
+    });
+}
+
+var sortCol = -1, sortAsc = true;
+function sortTable(col) {
+    var tbody = document.querySelector('tbody');
+    var rows = Array.from(tbody.querySelectorAll('tr'));
+    if (sortCol === col) { sortAsc = !sortAsc; }
+    else { sortCol = col; sortAsc = true; }
+    document.querySelectorAll('.sort-icon').forEach(function(icon, i) {
+        icon.className = 'sort-icon bi ' + (i+1 === col ? (sortAsc ? 'bi-caret-up-fill active' : 'bi-caret-down-fill active') : '');
+    });
+    rows.sort(function(a, b) {
+        var ca = (a.cells[col].textContent || '').trim();
+        var cb = (b.cells[col].textContent || '').trim();
+        if (col === 4) {
+            var na = (a.querySelectorAll('.cat-tag').length) || 0;
+            var nb = (b.querySelectorAll('.cat-tag').length) || 0;
+            return sortAsc ? na - nb : nb - na;
+        }
+        return sortAsc ? ca.localeCompare(cb, 'zh-CN') : cb.localeCompare(ca, 'zh-CN');
+    });
+    rows.forEach(function(row) { tbody.appendChild(row); });
+}
+
+// ── 批量操作 ──
+function onRowCheck() {
+    var checked = document.querySelectorAll('.row-cb:checked').length;
+    document.getElementById('batchCount').textContent = '已选 ' + checked + ' 台';
+    document.getElementById('batchBar').style.display = checked > 0 ? '' : 'none';
+    document.getElementById('selectAllCb').checked = false;
+    document.getElementById('selectAllCb').indeterminate = checked > 0;
+}
+function onSelectAll(cb) {
+    document.querySelectorAll('.row-cb').forEach(function(c) { c.checked = cb.checked; });
+    onRowCheck();
+}
+function toggleSelectAll() {
+    var all = document.querySelectorAll('.row-cb');
+    var checked = document.querySelectorAll('.row-cb:checked').length;
+    var select = checked < all.length;
+    all.forEach(function(c) { c.checked = select; });
+    document.getElementById('selectAllCb').checked = select;
+    onRowCheck();
+}
+async function batchDelete() {
+    var ids = Array.from(document.querySelectorAll('.row-cb:checked')).map(function(c) { return c.value; });
+    if (ids.length === 0) return;
+    var cfm = await swalDanger('确定删除选中的 ' + ids.length + ' 台服务配置吗？此操作不可恢复。', '批量删除');
+    if (!cfm.isConfirmed) return;
+    for (var i = 0; i < ids.length; i++) {
+        try { await apiFetch('/api/servers/' + ids[i], {method:'DELETE'}); } catch(e) {}
+    }
+    location.reload();
+}
+
+function checkPersistEnabled(cb) {
+    if (!logEnabled && cb.checked) {
+        cb.checked = false;
+        swalInfo('全局日志持久化未启用，请先在系统配置中开启"启用日志持久化"。', '功能未启用');
+        return false;
+    }
+    return true;
+}
+
+document.querySelectorAll('.edit-cat-check, .edit-os-check').forEach(cb => {
+    cb.addEventListener('change', () => { if(!window._syncingE) syncCheckAll('edit'); });
+});
+
+function toggleEditCats() {
+    var c = document.getElementById('editCatAll').checked;
+    toggleCheckAll('editDbCheckItems', 'edit-cat-check', c);
+    toggleCheckAll('editDbCheckItems', 'edit-os-check', c);
+    window._syncingE = true; syncCheckAll('edit'); window._syncingE = false;
+}
+function toggleEditOs() {
+    var c = document.getElementById('editOsAll').checked;
+    toggleCheckAll('editOsCheckItems', 'edit-os-check', c);
+    window._syncingE = true; syncCheckAll('edit'); window._syncingE = false;
+}
+
+// ═══ 编辑向导 ═══
+var editStepTitles = ['⚙ 环境配置','🔐 SSH 连接','📋 采集项','🗄 数据库','📱 应用','✅ 保存'];
+var editCur = 1, editTotal = 6;
+function editGoStep(dir) {
+    var n = editCur + dir;
+    if (n < 1 || n > editTotal) return;
+    if (dir > 0 && n === 4) editCheckDbSkip();
+    editSetStep(n);
+}
+function editSetStep(n) {
+    editCur = n;
+    var steps = document.querySelectorAll('#editSteps .step');
+    steps.forEach(function(e) {
+        var s = parseInt(e.dataset.step);
+        e.className = 'step' + (s === n ? ' active' : '') + (s < n && !e.classList.contains('skipped') ? ' done' : '');
+    });
+    document.querySelectorAll('#editModal .step-panel').forEach(function(p) {
+        p.classList.toggle('active', parseInt(p.dataset.step) === n);
+    });
+    document.getElementById('editStepTitle').textContent = editStepTitles[n-1];
+    var p = document.getElementById('editBtnPrev'), nx = document.getElementById('editBtnNext');
+    p.style.visibility = n === 1 ? 'hidden' : '';
+    if (n === editTotal) {
+        nx.style.display = 'none';
+        p.innerHTML = '<i class="bi bi-arrow-left"></i> 返回修改';
+    } else {
+        nx.style.display = '';
+        p.innerHTML = '<i class="bi bi-arrow-left"></i> 上一步';
+    }
+}
+function editHasDbCat() {
+    return document.querySelectorAll('.edit-cat-check:checked').length > 0
+        || (document.getElementById('edit-os-install_path') || {}).checked
+        || (document.getElementById('edit-os-db_log_errors') || {}).checked;
+}
+function editCheckDbSkip() {
+    var need = editHasDbCat();
+    document.getElementById('editDbForm').style.display = need ? '' : 'none';
+    document.getElementById('editDbSkip').style.display = need ? 'none' : '';
+    var s = document.querySelector('#editSteps .step[data-step="4"]');
+    if (!need) { s.classList.add('skipped'); s.classList.remove('done'); }
+    else { s.classList.remove('skipped'); }
+}
+function editShowDb() {
+    document.getElementById('editDbForm').style.display = '';
+    document.getElementById('editDbSkip').style.display = 'none';
+    document.querySelector('#editSteps .step[data-step="4"]').classList.remove('skipped');
+}
+
+function openEdit(serverId) {
+    const srv = serverList.find(s => s.id === serverId);
+    if (!srv) return;
+    document.getElementById('editId').value = srv.id;
+    document.getElementById('editName').value = srv.name || '';
+    document.getElementById('editSshHost').value = srv.ssh_host || '';
+    document.getElementById('editSshPort').value = srv.ssh_port || 22;
+    document.getElementById('editSshUser').value = srv.ssh_user || 'root';
+    document.getElementById('editSshPass').value = srv.ssh_pass || '';
+    document.getElementById('editDbHost').value = srv.db_host || '127.0.0.1';
+    document.getElementById('editDbPort').value = srv.db_port || 2003;
+    document.getElementById('editDbUser').value = srv.db_user || 'SYSDBA';
+    document.getElementById('editDbPass').value = srv.db_pass || '';
+    document.getElementById('editDbName').value = srv.db_name || 'OSRDB';
+    document.getElementById('editIsqlCmd').value = srv.isql_cmd || 'isql';
+    document.getElementById('editAutoRefresh').value = srv.auto_refresh || 0;
+    document.getElementById('editOsType').value = srv.os_type || 'linux';
+    document.getElementById('editDbType').value = srv.db_type || 'oscar';
+    document.querySelectorAll('.edit-cat-check').forEach(c => { c.checked = (srv.enabled_categories || []).includes(c.value); });
+    document.querySelectorAll('.edit-os-check').forEach(c => { c.checked = (srv.enabled_os_checks || []).includes(c.value); });
+    document.getElementById('editInControl').checked = srv.in_control !== undefined ? srv.in_control : true;
+    document.getElementById('editPersistEnabled').checked = srv.persist_enabled || false;
+    document.getElementById('editAppList').innerHTML = '';
+    (srv.apps || []).forEach(app => { addAppRow('edit'); var rows = document.querySelectorAll('.editapp-row'); var row = rows[rows.length-1];
+        row.querySelector('.app-name').value = app.name || ''; row.querySelector('.app-port').value = app.port || '';
+        row.querySelector('.app-svc').value = app.svc_name || ''; if(app.in_control) row.querySelector('.app-in-control').checked = true;
+        if(app.group) row.querySelector('.app-group').value = app.group; if(app.health_url) row.querySelector('.app-health-url').value = app.health_url;
+        if(app.start_cmd) row.querySelector('.app-start-cmd').value = app.start_cmd; if(app.stop_cmd) row.querySelector('.app-stop-cmd').value = app.stop_cmd;
+        if(app.svc_mgr) row.querySelector('.app-svc-mgr').value = app.svc_mgr; });
+    syncCheckAll('edit');
+    editSetStep(1);
+    new bootstrap.Modal(document.getElementById('editModal')).show();
+}
+
+function onEditOsChange() {
+    document.getElementById('editSshUser').value = document.getElementById('editOsType').value === 'windows' ? 'Administrator' : 'root';
+}
+function onEditDbTypeChange() {
+    var t = document.getElementById('editDbType').value;
+    var d = {oscar:{port:2003,user:'SYSDBA',db:'OSRDB',isql:'isql',label:'isql'},mysql:{port:3306,user:'root',db:'mysql',isql:'mysql',label:'mysql'},postgresql:{port:5432,user:'postgres',db:'postgres',isql:'psql',label:'psql'},oracle:{port:1521,user:'system',db:'ORCL',isql:'sqlplus',label:'sqlplus'}}[t] || {port:2003,user:'SYSDBA',db:'OSRDB',isql:'isql',label:'isql'};
+    document.getElementById('editDbPort').value = d.port;
+    document.getElementById('editDbUser').value = d.user;
+    document.getElementById('editDbName').value = d.db;
+    document.getElementById('editIsqlCmd').value = d.isql;
+    document.getElementById('editIsqlLabel').textContent = d.label;
+}
+
+async function saveEdit() {
+    const fields = [
+        {id:'editSshHost', label:'远程主机'},
+        {id:'editSshPort', label:'远程端口'},
+        {id:'editSshUser', label:'登录用户'},
+        {id:'editSshPass', label:'登录密码'},
+    ];
+    if (editHasDbCat()) {
+        fields.push({id:'editDbHost', label:'数据库主机'}, {id:'editDbPort', label:'数据库端口'},
+            {id:'editDbUser', label:'数据库用户'}, {id:'editDbPass', label:'数据库密码'},
+            {id:'editDbName', label:'数据库名'}, {id:'editIsqlCmd', label:'isql命令路径'});
+    }
+    if (!validateRequired(fields)) return;
+    const data = {
+        name: document.getElementById('editName').value || document.getElementById('editSshHost').value,
+        ssh_host: document.getElementById('editSshHost').value,
+        ssh_port: parseInt(document.getElementById('editSshPort').value) || 22,
+        ssh_user: document.getElementById('editSshUser').value,
+        ssh_pass: document.getElementById('editSshPass').value,
+        db_host: document.getElementById('editDbHost').value,
+        db_port: parseInt(document.getElementById('editDbPort').value) || 2003,
+        db_user: document.getElementById('editDbUser').value,
+        db_pass: document.getElementById('editDbPass').value,
+        db_name: document.getElementById('editDbName').value,
+        isql_cmd: document.getElementById('editIsqlCmd').value || 'isql',
+        auto_refresh: parseInt(document.getElementById('editAutoRefresh').value) || 0,
+        os_type: document.getElementById('editOsType').value || 'linux',
+        db_type: document.getElementById('editDbType').value || 'oscar',
+        in_control: document.getElementById('editInControl').checked,
+        persist_enabled: document.getElementById('editPersistEnabled').checked,
+        enabled_categories: Array.from(document.querySelectorAll('.edit-cat-check:checked')).map(c => c.value),
+        enabled_os_checks: Array.from(document.querySelectorAll('.edit-os-check:checked')).map(c => c.value),
+        apps: collectApps('edit'),
+    };
+    try {
+        const resp = await apiFetch('/api/servers/' + document.getElementById('editId').value, {
+            method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)
+        });
+        if (resp.status === 'ok') location.reload();
+        else swalError(resp.error || '未知错误');
+    } catch (e) { swalError(e.message); }
+}
+
+async function testEditConnection() {
+    // 先验证必填项
+    const fields = [
+        {id:'editSshHost', label:'远程主机'},
+        {id:'editSshPort', label:'远程端口'},
+        {id:'editSshUser', label:'登录用户'},
+        {id:'editSshPass', label:'登录密码'},
+    ];
+    if (editHasDbCat()) {
+        fields.push({id:'editDbHost', label:'数据库主机'}, {id:'editDbPort', label:'数据库端口'},
+            {id:'editDbUser', label:'数据库用户'}, {id:'editDbPass', label:'数据库密码'},
+            {id:'editDbName', label:'数据库名'}, {id:'editIsqlCmd', label:'isql命令路径'});
+    }
+    if (!validateRequired(fields)) return;
+
+    const btn = document.getElementById('editTestResult');
+    btn.innerHTML = '<span class="text-warning small"><i class="bi bi-hourglass-split"></i> 测试中...</span>';
+    const data = {
+        ssh_host: document.getElementById('editSshHost').value,
+        ssh_port: parseInt(document.getElementById('editSshPort').value) || 22,
+        ssh_user: document.getElementById('editSshUser').value,
+        ssh_pass: document.getElementById('editSshPass').value,
+        db_host: document.getElementById('editDbHost').value,
+        db_port: parseInt(document.getElementById('editDbPort').value) || 2003,
+        db_user: document.getElementById('editDbUser').value,
+        db_pass: document.getElementById('editDbPass').value,
+        db_name: document.getElementById('editDbName').value,
+        isql_cmd: document.getElementById('editIsqlCmd').value || 'isql',
+        os_type: document.getElementById('editOsType').value || 'linux',
+        db_type: document.getElementById('editDbType').value || 'oscar',
+        skip_db: !hasEditDbCategory(),
+    };
+    try {
+        const r = await apiFetch('/api/test-connection', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+        let h = '';
+        if (r.error) { h = '<span class="text-danger small">❌ '+escapeHtml(r.error)+'</span>'; }
+        else {
+            if (r.ssh) h += '<span class="text-'+(r.ssh.ok?'success':'danger')+' small">SSH: '+escapeHtml(r.ssh.msg)+'</span> ';
+            if (r.db) h += '<span class="text-'+(r.db.ok?'success':'danger')+' small">DB: '+escapeHtml(r.db.msg)+'</span>';
+        }
+        btn.innerHTML = h || '<span class="text-muted small">无结果</span>';
+    } catch(e) { btn.innerHTML = '<span class="text-danger small">网络异常: '+escapeHtml(e.message)+'</span>'; }
+}
+
+async function deleteServer(serverId) {
+    const cfm = await swalDanger('确定删除该服务配置吗？此操作不可恢复。', '删除服务');
+    if (!cfm.isConfirmed) return;
+    await apiFetch('/api/servers/' + serverId, {method:'DELETE'});
+    location.reload();
+}
+{% endraw %}
+</script>
+{% endblock %}
