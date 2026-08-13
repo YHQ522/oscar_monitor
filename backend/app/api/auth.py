@@ -4,13 +4,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from ..config import Settings, get_settings
+from ..config import Settings
 from ..core.rate_limit import LoginRateLimiter, get_login_limiter
 from ..core.security import create_token
-from ..models.user import PERMISSIONS, UserCreate, UserUpdate
+from ..models.user import UserCreate, UserUpdate
 from ..services.auth_service import UserService
 from .deps import (
-    any_permission,
     get_client_ip,
     get_current_user,
     get_settings_dep,
@@ -65,11 +64,6 @@ def login(
     raise HTTPException(status_code=401, detail="用户名或密码错误")
 
 
-@router.post("/auth/logout")
-def logout():
-    return {"status": "ok"}
-
-
 @router.get("/auth/me")
 def me(user: dict = Depends(get_current_user)):
     return _public(user)
@@ -122,11 +116,6 @@ def delete_user(username: str, user_service: UserService = Depends(get_user_serv
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
     return {"status": "ok", "msg": msg}
-
-
-@router.get("/permissions", dependencies=[Depends(require_permission("admin"))])
-def permissions():
-    return PERMISSIONS
 
 
 # ═══════════════ IP 封禁管理（admin） ═══════════════

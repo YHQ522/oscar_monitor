@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ..services.collector import app_control, db_control
 from ..services.server_service import ServerService
-from .deps import any_permission, get_current_user, get_server_service_dep, require_permission
+from .deps import any_permission, get_current_user, get_server_service_dep
 
 router = APIRouter(prefix="/api", tags=["control"])
 

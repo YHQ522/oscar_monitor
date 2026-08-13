@@ -6,7 +6,6 @@ import io
 import json
 import os
 import time
-from datetime import datetime
 from typing import Any
 
 from openpyxl import Workbook
@@ -85,33 +84,6 @@ class ExportService:
 
         filename = f"{server_id}_export.csv"
         return filename, output.getvalue()
-
-    # ═══════════════ SQL 结果导出 ═══════════════
-    def export_sql_result(self, columns: list, rows: list) -> str:
-        if not columns:
-            raise ValueError("无列信息")
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "SQL查询结果"
-        header_font = Font(bold=True, color="FFFFFF")
-        header_fill = PatternFill(start_color="6366F1", end_color="6366F1", fill_type="solid")
-        for ci, col in enumerate(columns, 1):
-            cell = ws.cell(row=1, column=ci, value=str(col))
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = Alignment(horizontal="center")
-        for ri, row in enumerate(rows, 2):
-            for ci in range(len(columns)):
-                val = row[ci] if ci < len(row) else ""
-                ws.cell(row=ri, column=ci + 1, value=str(val) if val is not None else "NULL")
-        for ci in range(1, len(columns) + 1):
-            ws.column_dimensions[get_column_letter(ci)].width = 18
-
-        self.settings.reports_dir.mkdir(parents=True, exist_ok=True)
-        filename = f"sql_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-        filepath = self.settings.reports_dir / filename
-        wb.save(filepath)
-        return filename
 
     # ═══════════════ 巡检 Excel ═══════════════
     def export_xlsx(self, server_ids: list[str], categories: list[str], os_checks: list[str], organize_by: str = "server") -> str:

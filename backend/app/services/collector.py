@@ -10,9 +10,9 @@ import subprocess
 import time
 from typing import Any
 
-from ..adapters import get_adapter, get_query_sets
+from ..adapters import get_query_sets
 from ..config import Settings, get_settings
-from ..core.constants import DB_RELATED_OS_CHECKS, OS_CHECK_LABELS, OS_CHECKS_LINUX, OS_CHECKS_WIN
+from ..core.constants import DB_RELATED_OS_CHECKS, OS_CHECKS_LINUX, OS_CHECKS_WIN
 from ..core.db_exec import build_sql_cmd, parse_isql_output, parse_table_output, temp_sql_path
 from ..core.ssh import is_win, need_ssh, run_local, ssh_connect, ssh_exec, strip_ansi, translate_error
 from ..core.constants import DB_ERROR_TRANSLATE, SSH_ERROR_TRANSLATE, SSH_FIX_LINUX, SSH_FIX_WIN

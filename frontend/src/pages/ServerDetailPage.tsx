@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useCacheStore } from '../store/cache'
 import {
-  Card, Descriptions, Tabs, Button, Space, Tag, Skeleton, Statistic, Row, Col, Empty, Alert,
+  Card, Descriptions, Tabs, Button, Space, Tag, Skeleton, Statistic, Row, Col, Empty,
 } from 'antd'
 import { App as AntApp } from 'antd'
 import {

@@ -16,7 +16,19 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 def _default_data_dir() -> Path:
     if getattr(sys, "frozen", False):
-        return Path(os.path.dirname(sys.executable)) / "data"
+        # 默认数据目录 = exe 同级 data/（绿色版）
+        candidate = Path(os.path.dirname(sys.executable)) / "data"
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            probe = candidate / ".write_probe"
+            probe.touch()
+            probe.unlink()
+            return candidate
+        except OSError:
+            # 安装目录不可写（如 Program Files）时回退到用户数据目录，
+            # 避免因无写权限导致启动失败
+            base = Path(os.environ.get("LOCALAPPDATA", str(Path.home())))
+            return base / "oscar_monitor" / "data"
     return Path(__file__).resolve().parent.parent.parent / "data"
 
 
@@ -29,6 +41,8 @@ class Settings(BaseSettings):
     app_name: str = "oscar-monitor"
     data_dir: Path = Field(default_factory=_default_data_dir)
     storage_backend: str = "json"  # json | sqlite
+    # 监听端口：优先级 命令行 --port > config.json 的 port > 环境变量 OSCAR_PORT > 5080
+    port: int = 5080
 
     # ── 认证 ──
     # 生产环境请通过环境变量 OSCAR_SECRET_KEY 或 .env 覆盖（≥32 字节）
@@ -143,8 +157,11 @@ def get_settings() -> Settings:
     否则用户保存的配置在重启后回落到默认值。
     """
     s = Settings()
-    legacy = load_legacy_config()
+    # 注意：必须用解析后的 s.data_dir（可能被 OSCAR_DATA_DIR 环境变量重定位），
+    # 而非 _default_data_dir()，否则安装版/自定义数据目录下会读错 config.json。
+    legacy = load_legacy_config(s.data_dir)
     for key in (
+        "port",
         "log_enabled",
         "server_db_enabled",
         "log_retention_days",

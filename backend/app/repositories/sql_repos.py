@@ -9,7 +9,7 @@ import time
 from typing import Any
 
 from sqlalchemy import Column, Integer, String, Text, create_engine, event
-from sqlalchemy.orm import Session, declarative_base, sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker
 
 from ..config import Settings
 from . import ServerRepository, UserRepository

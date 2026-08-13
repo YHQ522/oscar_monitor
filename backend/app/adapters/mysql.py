@@ -75,5 +75,5 @@ class MySqlAdapter(DBAdapter):
     def sql_cast_ts(self, v: str) -> str:
         return f"str_to_date('{v}','%Y-%m-%d %H:%i:%s')"
 
-    def sql_concat(self, a: str, b: str) -> str:
+    def sql_concat(self, a: str, _b: str) -> str:
         return f"ifnull({a},'')"

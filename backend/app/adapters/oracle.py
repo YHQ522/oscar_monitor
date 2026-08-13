@@ -90,7 +90,7 @@ class OracleAdapter(DBAdapter):
     def sql_cast_ts(self, v: str) -> str:
         return f"TO_TIMESTAMP('{v}','YYYY-MM-DD HH24:MI:SS')"
 
-    def sql_concat(self, a: str, b: str) -> str:
+    def sql_concat(self, a: str, _b: str) -> str:
         return f"NVL({a},'')"
 
     def sql_from_dual(self) -> str:

@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
-  Button, Space, Tag, Modal, Empty, Skeleton, Progress,
+  Button, Space, Modal, Empty, Skeleton,
 } from 'antd'
 import { App as AntApp } from 'antd'
 import {
@@ -22,42 +22,11 @@ function scoreColor(score: number | null): string {
   return '#ef4444'
 }
 
-// 进度条颜色（按使用率）
-function barColor(p: number | null): string {
-  if (p == null) return '#cbd5e1'
-  if (p >= 80) return '#ef4444'
-  if (p >= 60) return '#d97706'
-  return '#059669'
-}
-
-// 解析 "18%" → 18
-function parsePct(v: string | undefined): number | null {
-  if (!v) return null
-  const n = parseFloat(v)
-  return Number.isNaN(n) ? null : n
-}
-
 // 解析 "3 条" / "0" → 数字
 function parseCount(v: string | undefined): number {
   if (!v) return 0
   const n = parseInt(v, 10)
   return Number.isNaN(n) ? 0 : n
-}
-
-// 健康指标标签：与后端 health.details 的 key 对应
-const DETAIL_LABELS: Record<string, string> = {
-  cpu: 'CPU',
-  memory: '内存',
-  sessions: '连接数',
-  slow_sql: '慢SQL',
-  deadlocks: '死锁',
-}
-
-// 单项健康状态颜色（红黄绿）
-const STATUS_COLORS: Record<string, string> = {
-  healthy: '#059669',
-  warning: '#d97706',
-  danger: '#dc2626',
 }
 
 // 玻璃拟态样式常量
@@ -239,14 +208,6 @@ export default function DashboardPage() {
     const t = s.skip_db ? '仅系统' : (s.db_type || 'oscar')
     typeCounts[t] = (typeCounts[t] || 0) + 1
   })
-  const TYPE_META: Record<string, { label: string; color: string }> = {
-    oscar: { label: 'Oscar 神通', color: '#38bdf8' },
-    mysql: { label: 'MySQL', color: '#4ade80' },
-    postgresql: { label: 'PostgreSQL', color: '#fbbf24' },
-    oracle: { label: 'Oracle', color: '#f87171' },
-    '仅系统': { label: '仅系统监控', color: '#94a3b8' },
-  }
-  const offlineCount = servers.length - onlineCount
   // 数据库性能指标汇总
   const totalSessions = servers.reduce((a, s) => a + parseCount(scores[s.id]?.details?.sessions?.value), 0)
   const totalSlow = servers.reduce((a, s) => a + parseCount(scores[s.id]?.details?.slow_sql?.value), 0)
@@ -303,7 +264,6 @@ export default function DashboardPage() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: 16, marginBottom: 16 }}>
         <Panel title="服务器状态">
           {servers.length === 0 ? <EmptyTip text="暂无服务器，请先添加" /> : servers.map((s) => {
-            const data = cache[s.id]
             const score = scores[s.id]?.score
             const details = scores[s.id]?.details || {}
             const meta = dbTypeMeta(s)

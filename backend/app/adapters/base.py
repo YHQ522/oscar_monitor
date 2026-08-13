@@ -46,7 +46,7 @@ class DBAdapter:
     def sql_cast_ts(self, v: str) -> str:
         return f"'{v}'::timestamp"
 
-    def sql_concat(self, a: str, b: str) -> str:
+    def sql_concat(self, a: str, _b: str) -> str:
         return f"coalesce({a},'')"
 
     def sql_from_dual(self) -> str:

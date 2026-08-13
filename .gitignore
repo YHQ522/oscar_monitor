@@ -4,9 +4,12 @@ __pycache__/
 *.pyo
 *.egg-info/
 *.egg
-dist/
-build/
-*.spec
+
+# PyInstaller 构建产物（保留 build/ 下的打包脚本源码）
+/build/dist/
+/build/build/
+/build/assets/oscar-monitor.ico
+/backend/dist/
 
 # Virtual Environment
 .venv/

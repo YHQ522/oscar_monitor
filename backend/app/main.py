@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -16,6 +17,20 @@ from .services.scheduler import get_collect_scheduler
 
 logger = logging.getLogger("oscar_monitor")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+
+def _frontend_dist_dir() -> Path | None:
+    """定位前端构建产物 frontend/dist。
+
+    优先在 PyInstaller 冻结（_MEIPASS）目录下查找，其次回退到源码目录，
+    兼容「开发 / 源码部署 / 单文件打包」三种运行形态。
+    """
+    if getattr(sys, "frozen", False):
+        meipass = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+        bundled = meipass / "frontend" / "dist"
+        if bundled.exists():
+            return bundled
+    return Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 
 
 def create_app(settings: Settings | None = None, start_scheduler: bool = True) -> FastAPI:
@@ -57,14 +72,14 @@ def create_app(settings: Settings | None = None, start_scheduler: bool = True) -
 
     # 全局异常处理
     @app.exception_handler(Exception)
-    async def unhandled_exception(request: Request, exc: Exception):
+    async def unhandled_exception(request: Request, _exc: Exception):
         logger.exception("未处理异常: %s %s", request.method, request.url.path)
         # 不向客户端泄露内部异常细节（含路径/SQL/内部状态），仅记录日志
         return JSONResponse(status_code=500, content={"detail": "服务器内部错误"})
 
     # 前端静态资源（生产模式：frontend/dist 构建产物）
-    frontend_dist = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
-    if frontend_dist.exists():
+    frontend_dist = _frontend_dist_dir()
+    if frontend_dist is not None and frontend_dist.exists():
         app.mount("/assets", StaticFiles(directory=frontend_dist / "assets"), name="assets")
 
         @app.get("/{full_path:path}", include_in_schema=False)

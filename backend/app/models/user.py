@@ -17,19 +17,6 @@ PERMISSIONS: dict[str, str] = {
 ALL_PERMS = list(PERMISSIONS.keys())
 
 
-class User(BaseModel):
-    username: str
-    password: str = ""
-    is_admin: bool = False
-    perms: list[str] = Field(default_factory=list)
-    created_at: Optional[str] = None
-
-    def has_permission(self, perm: str) -> bool:
-        if self.is_admin:
-            return True
-        return perm in self.perms
-
-
 class UserCreate(BaseModel):
     username: str
     password: str
@@ -41,10 +28,3 @@ class UserUpdate(BaseModel):
     password: Optional[str] = None
     is_admin: Optional[bool] = None
     perms: Optional[list[str]] = None
-
-
-class UserOut(BaseModel):
-    username: str
-    is_admin: bool = False
-    perms: list[str] = Field(default_factory=list)
-    created_at: Optional[str] = None

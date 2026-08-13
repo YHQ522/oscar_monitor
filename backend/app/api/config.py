@@ -1,7 +1,7 @@
 """系统配置路由：读取/更新配置、测试日志库连接。"""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
 from ..config import Settings
 from ..core.constants import DB_ERROR_TRANSLATE, SSH_ERROR_TRANSLATE, SSH_FIX_LINUX, SSH_FIX_WIN

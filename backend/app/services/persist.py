@@ -11,7 +11,6 @@ from typing import Any
 from ..adapters import get_adapter
 from ..config import Settings
 from ..core.db_exec import exec_sql, parse_isql_output
-from ..core.ssh import need_ssh, run_local
 
 LOG_TABLE = "oscar_log_collect"
 

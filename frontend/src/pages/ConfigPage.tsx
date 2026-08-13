@@ -37,6 +37,7 @@ export default function ConfigPage() {
           log_enabled: c.log_enabled,
           log_retention_days: c.log_retention_days,
           collect_workers: c.collect_workers,
+          port: c.port,
           trend_retention_days: c.trend_retention_days,
           ssh_connect_timeout: c.ssh_connect_timeout,
           ssh_exec_timeout: c.ssh_exec_timeout,
@@ -95,6 +96,7 @@ export default function ConfigPage() {
         log_enabled: values.log_enabled,
         log_retention_days: values.log_retention_days,
         collect_workers: values.collect_workers,
+        port: values.port,
         trend_retention_days: values.trend_retention_days,
         ssh_connect_timeout: values.ssh_connect_timeout,
         ssh_exec_timeout: values.ssh_exec_timeout,
@@ -273,6 +275,9 @@ export default function ConfigPage() {
             <Form.Item name="collect_workers" label="并发采集线程数">
               <InputNumber min={1} max={32} style={{ width: '100%' }} />
             </Form.Item>
+            <Form.Item name="port" label="服务监听端口" extra="重启后生效">
+              <InputNumber min={1} max={65535} style={{ width: '100%' }} />
+            </Form.Item>
             <Form.Item name="trend_retention_days" label="趋势保留天数">
               <InputNumber min={1} max={365} style={{ width: '100%' }} />
             </Form.Item>
@@ -350,6 +355,7 @@ export default function ConfigPage() {
           <Tag color={cfg.log_enabled ? 'green' : 'default'}>{cfg.log_enabled ? '已启用' : '未启用'}</Tag>
         </Descriptions.Item>
         <Descriptions.Item label="并发采集线程">{cfg.collect_workers ?? '-'}</Descriptions.Item>
+        <Descriptions.Item label="服务端口">{cfg.port ?? 5080}</Descriptions.Item>
         <Descriptions.Item label="日志保留天数">{cfg.log_retention_days ?? '-'}</Descriptions.Item>
         <Descriptions.Item label="趋势保留天数">{cfg.trend_retention_days ?? '-'}</Descriptions.Item>
         <Descriptions.Item label="SSH 连接超时">{cfg.ssh_connect_timeout ? `${cfg.ssh_connect_timeout}s` : '-'}</Descriptions.Item>

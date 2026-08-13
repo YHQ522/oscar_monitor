@@ -11,9 +11,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from ..config import Settings, get_settings
+from ..config import Settings
 from ..core.security import decode_token
-from ..services.auth_service import UserService, get_user_service
+from ..services.auth_service import UserService
 from ..services.cache import CacheStore
 from .deps import get_cache_dep, get_settings_dep, get_user_service_dep
 

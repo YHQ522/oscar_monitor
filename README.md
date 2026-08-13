@@ -109,6 +109,23 @@ cd backend
 uv run pytest          # 26 项测试全部通过
 ```
 
+## 免环境打包（安装包 / exe）
+
+无需目标机器安装 Python / Node，PyInstaller 把「后端 + 前端产物」打成单文件，
+Windows 再用 Inno Setup 封装成正式安装包：
+
+| 平台 | 命令 | 产物 |
+|---|---|---|
+| Windows | `build\build_win.bat` | `build\dist\oscar-monitor-setup-2.0.0.exe`（**安装包**）+ 单文件 exe |
+| Linux | `bash build/build_linux.sh` | `build/dist/oscar-monitor` + 自解压安装包 `.sh`（systemd 托管） |
+
+Windows 安装包特性：管理员安装、**安装时可指定端口**（向导端口页 / `/Port=` 参数）、
+数据目录自动配置到 `C:\ProgramData\OscarMonitor\data`（运行时可写）、
+快捷方式/开机自启可选、完整卸载（自动清理环境变量与进程）。
+端口优先级：命令行 `--port` > `config.json` 的 `port` > 环境变量 `OSCAR_PORT` > 5080。
+
+详见 [`build/README_BUILD.md`](build/README_BUILD.md)。
+
 ## 与旧版的关键差异
 
 | 维度 | 旧版 | v2 |

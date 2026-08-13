@@ -6,7 +6,6 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ..config import Settings
 from ..models.server import ServerCreate, ServerOut, ServerUpdate
 from ..services.cache import CacheStore
 from ..services.collector import test_connection
@@ -21,7 +20,6 @@ from .deps import (
     get_log_service_dep,
     get_scheduler_dep,
     get_server_service_dep,
-    get_settings_dep,
     get_trend_dep,
     require_permission,
 )

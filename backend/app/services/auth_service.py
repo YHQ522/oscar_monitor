@@ -6,7 +6,7 @@ from typing import Any
 
 from ..config import Settings
 from ..core.security import hash_password, needs_upgrade, verify_password
-from ..models.user import ALL_PERMS, PERMISSIONS, User
+from ..models.user import ALL_PERMS, PERMISSIONS
 from ..repositories import UserRepository
 
 

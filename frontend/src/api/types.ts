@@ -146,6 +146,7 @@ export interface SysConfig {
   server_db_enabled?: boolean
   log_retention_days?: number
   collect_workers?: number
+  port?: number
   export_schedule?: Record<string, unknown>
   storage_backend?: string
   trend_retention_days?: number
