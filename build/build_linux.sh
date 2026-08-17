@@ -20,11 +20,29 @@ SETUP_NAME="oscar-monitor-setup-${VERSION}-linux-x86_64.sh"
 PYTHON="$(command -v python3 || command -v python)"
 
 echo "[1/5] 构建前端静态资源..."
-if ! command -v node >/dev/null 2>&1; then echo "[错误] 未找到 Node.js，请安装 Node 18+"; exit 1; fi
-node -v
-# 兼容不同 npm 版本：lockfileVersion 3 需 npm 9+；老版本 npm ci 会崩溃，回退 npm install
-( cd frontend && (npm ci --no-audit --no-fund 2>/dev/null || npm install --no-audit --no-fund) && npm run build ) \
-    || { echo "[错误] 前端构建失败（可尝试: cd frontend && rm -rf node_modules package-lock.json && npm install）"; exit 1; }
+if ! command -v node >/dev/null 2>&1; then
+  echo "[错误] 未找到 Node.js，请安装 Node 18+（npm 需 >= 9）"
+  echo "  Ubuntu/Debian: curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt install -y nodejs"
+  echo "  CentOS/RHEL:   curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash - && sudo yum install -y nodejs"
+  exit 1
+fi
+NODE_MAJOR="$(node -v | sed 's/^v\([0-9]*\).*/\1/')"
+NPM_MAJOR="$(npm -v 2>/dev/null | cut -d. -f1 || echo 0)"
+echo "node $(node -v) / npm $(npm -v 2>/dev/null || echo '未安装')"
+if [ "${NODE_MAJOR:-0}" -lt 18 ] || [ "${NPM_MAJOR:-0}" -lt 9 ]; then
+  echo "[错误] Node 需 >= 18 且 npm 需 >= 9（lockfileVersion 3 需要），当前版本过低"
+  echo "  Ubuntu/Debian: curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt install -y nodejs"
+  echo "  CentOS/RHEL:   curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash - && sudo yum install -y nodejs"
+  exit 1
+fi
+# lockfileVersion 3 需 npm 9+；若 lockfile 损坏/不兼容，移到备份后重新安装（自动重建）
+( cd frontend && \
+  ( npm ci --no-audit --no-fund || npm install --no-audit --no-fund ) \
+  || ( echo ">>> lockfile 不兼容，备份后重新安装..."; \
+       mv -f package-lock.json package-lock.json.bak 2>/dev/null || true; \
+       rm -rf node_modules; npm install --no-audit --no-fund ) \
+) || { echo "[错误] 前端依赖安装失败"; exit 1; }
+( cd frontend && npm run build ) || { echo "[错误] 前端构建失败"; exit 1; }
 
 echo "[2/5] 检查 Python..."
 if [ -z "$PYTHON" ]; then echo "[错误] 未找到 python3"; exit 1; fi
