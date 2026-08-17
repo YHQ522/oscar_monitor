@@ -20,7 +20,11 @@ SETUP_NAME="oscar-monitor-setup-${VERSION}-linux-x86_64.sh"
 PYTHON="$(command -v python3 || command -v python)"
 
 echo "[1/5] 构建前端静态资源..."
-( cd frontend && npm ci --no-audit --no-fund && npm run build )
+if ! command -v node >/dev/null 2>&1; then echo "[错误] 未找到 Node.js，请安装 Node 18+"; exit 1; fi
+node -v
+# 兼容不同 npm 版本：lockfileVersion 3 需 npm 9+；老版本 npm ci 会崩溃，回退 npm install
+( cd frontend && (npm ci --no-audit --no-fund 2>/dev/null || npm install --no-audit --no-fund) && npm run build ) \
+    || { echo "[错误] 前端构建失败（可尝试: cd frontend && rm -rf node_modules package-lock.json && npm install）"; exit 1; }
 
 echo "[2/5] 检查 Python..."
 if [ -z "$PYTHON" ]; then echo "[错误] 未找到 python3"; exit 1; fi
