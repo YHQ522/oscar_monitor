@@ -208,7 +208,7 @@ export default function ServerDetailPage() {
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/')}>返回</Button>
         <h2 style={{ margin: 0, display: 'inline' }}>{server.name}</h2>
         <Tag>{server.skip_db ? '—' : server.db_type.toUpperCase()}</Tag>
-        <Tag color={data ? 'green' : 'default'}>{data ? '在线' : '未采集'}</Tag>
+        <Tag color={!data ? 'default' : data.status === 'offline' ? 'red' : 'green'}>{!data ? '未采集' : data.status === 'offline' ? '离线' : '在线'}</Tag>
         <Button icon={<ThunderboltOutlined />} loading={collecting} onClick={() => collect()}>全量采集</Button>
         <Button icon={<ReloadOutlined />} onClick={loadTrends}>刷新趋势</Button>
         <Button icon={<DownloadOutlined />} onClick={() => downloadFile(`/api/export/csv/${id}`, `${server.name}.csv`)}>导出 CSV</Button>

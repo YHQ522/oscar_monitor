@@ -205,6 +205,11 @@ def calc_health_score(
     total_weight = 0
     weighted_score = 0
 
+    # 离线快照（采集完全失败）：直接返回无分，前端据此显示离线
+    if data.get("status") == "offline":
+        details["offline"] = {"value": data.get("error") or "离线", "score": 0, "status": "danger"}
+        return None, details
+
     def os_on(key: str) -> bool:
         return enabled_os_checks is None or key in enabled_os_checks
 

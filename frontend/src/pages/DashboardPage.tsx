@@ -14,6 +14,9 @@ import { api, downloadFile } from '../api/client'
 import { useServerCache } from '../hooks/useSSE'
 import type { Server, HealthScore } from '../api/types'
 import { useAuth } from '../store/auth'
+import CpuPanel from '../components/CpuPanel'
+import DiskUsage from '../components/DiskUsage'
+import QueryTable from '../components/QueryTable'
 
 function scoreColor(score: number | null): string {
   if (score == null) return '#cbd5e1'
@@ -119,18 +122,29 @@ export default function DashboardPage() {
   const [scores, setScores] = useState<Record<string, HealthScore>>({})
   const [loading, setLoading] = useState(false)
   const [collecting, setCollecting] = useState<string | null>(null)
+  // 点击查看详情：资源指标明细弹窗 / 健康得分构成弹窗 / 资源告警明细弹窗
+  const [resModal, setResModal] = useState<{ server: Server; key: string } | null>(null)
+  const [scoreModal, setScoreModal] = useState<Server | null>(null)
+  const [alertsOpen, setAlertsOpen] = useState(false)
+  // 性能汇总弹窗 / 活动会话弹窗 / 健康分布筛选
+  const [perfModal, setPerfModal] = useState<'sessions' | 'slow' | 'dead' | null>(null)
+  const [actModal, setActModal] = useState<Server | null>(null)
+  const [statusFilter, setStatusFilter] = useState<'good' | 'warn' | 'bad' | 'none' | 'offline' | null>(null)
+  const [columnLabels, setColumnLabels] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
 
   const loadServers = async () => {
     setLoading(true)
     try {
-      // 列表与批量健康评分并行拉取（避免 N+1 请求）
-      const [list, scoreMap] = await Promise.all([
+      // 列表 + 批量健康评分 + 列名映射并行拉取（避免 N+1 请求）
+      const [list, scoreMap, meta] = await Promise.all([
         api.get<Server[]>('/api/servers'),
         api.get<Record<string, HealthScore>>('/api/health').catch(() => ({})),
+        api.get<{ column_labels?: Record<string, string> }>('/api/meta').catch(() => ({} as { column_labels?: Record<string, string> })),
       ])
       setServers(list)
       setScores(scoreMap)
+      setColumnLabels(meta?.column_labels || {})
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -202,11 +216,16 @@ export default function DashboardPage() {
 
   const canEdit = user?.is_admin || user?.perms.includes('servers_edit')
 
-  // 概览统计
-  const onlineCount = servers.filter((s) => cache[s.id]).length
+  // 概览统计：有采集数据且非离线才算在线；离线/低分均计入异常
+  const isOnline = (s: Server) => {
+    const d = cache[s.id]
+    return !!d && d.status !== 'offline'
+  }
+  const onlineCount = servers.filter(isOnline).length
+  const offlineCount = servers.filter((s) => cache[s.id]?.status === 'offline').length
   const abnormalCount = servers.filter((s) => {
     const sc = scores[s.id]?.score
-    return sc != null && sc < 60
+    return (sc != null && sc < 60) || cache[s.id]?.status === 'offline'
   }).length
   const validScores = servers
     .map((s) => scores[s.id]?.score)
@@ -215,16 +234,31 @@ export default function DashboardPage() {
     ? Math.round(validScores.reduce((a, b) => a + b, 0) / validScores.length)
     : '—'
 
-  // 健康分布统计（良好/关注/异常/未采集）
-  const buckets = { good: 0, warn: 0, bad: 0, none: 0 }
-  servers.forEach((s) => {
+  // 健康分布统计（良好/关注/异常/未采集/离线）
+  const bucketOf = (s: Server): 'good' | 'warn' | 'bad' | 'none' | 'offline' => {
+    if (cache[s.id]?.status === 'offline') return 'offline'
     const sc = scores[s.id]?.score
-    if (sc == null) buckets.none++
-    else if (sc >= 80) buckets.good++
-    else if (sc >= 60) buckets.warn++
-    else buckets.bad++
+    if (sc == null) return 'none'
+    if (sc >= 80) return 'good'
+    if (sc >= 60) return 'warn'
+    return 'bad'
+  }
+  const buckets = { good: 0, warn: 0, bad: 0, none: 0, offline: 0 }
+  servers.forEach((s) => {
+    buckets[bucketOf(s)]++
   })
   const pctOf = (n: number) => (servers.length ? Math.round((n / servers.length) * 100) : 0)
+
+  const BUCKET_ROWS = [
+    { key: 'good', label: '🟢 良好 ≥80', n: buckets.good },
+    { key: 'warn', label: '🟠 关注 60-79', n: buckets.warn },
+    { key: 'bad', label: '🔴 异常 <60', n: buckets.bad },
+    { key: 'none', label: '⚪ 未采集', n: buckets.none },
+    { key: 'offline', label: '⚫ 离线', n: buckets.offline },
+  ] as const
+  const shownServers = statusFilter
+    ? servers.filter((s) => bucketOf(s) === statusFilter)
+    : servers
 
   // 资源告警统计：CPU/内存/磁盘任一 warning 或 danger 的服务器数
   const resourceAlerts = servers.filter((s) => {
@@ -278,13 +312,13 @@ export default function DashboardPage() {
       {/* ===== KPI 玻璃卡 ===== */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: 16, marginBottom: 16 }}>
         {[
-          { icon: <CloudServerOutlined />, label: '服务器总数', value: servers.length, grad: 'linear-gradient(135deg,#6366f1,#8b5cf6)' },
-          { icon: <CheckCircleOutlined />, label: '在线运行', value: onlineCount, grad: 'linear-gradient(135deg,#10b981,#34d399)' },
-          { icon: <CloseCircleOutlined />, label: '异常', value: abnormalCount, grad: 'linear-gradient(135deg,#ef4444,#f97316)' },
+          { icon: <CloudServerOutlined />, label: '服务器总数', value: servers.length, grad: 'linear-gradient(135deg,#6366f1,#8b5cf6)', onClick: () => navigate('/servers') },
+          { icon: <CheckCircleOutlined />, label: '在线运行', value: onlineCount, grad: 'linear-gradient(135deg,#10b981,#34d399)', onClick: () => navigate('/servers') },
+          { icon: <CloseCircleOutlined />, label: '异常', value: abnormalCount, grad: 'linear-gradient(135deg,#ef4444,#f97316)', onClick: () => navigate('/servers') },
           { icon: <DashboardOutlined />, label: '平均健康分', value: avgScore, grad: 'linear-gradient(135deg,#f59e0b,#fbbf24)' },
-          { icon: <AlertOutlined />, label: '资源告警', value: resourceAlerts, grad: 'linear-gradient(135deg,#dc2626,#f43f5e)' },
+          { icon: <AlertOutlined />, label: '资源告警', value: resourceAlerts, grad: 'linear-gradient(135deg,#dc2626,#f43f5e)', onClick: () => setAlertsOpen(true) },
         ].map((m) => (
-          <div key={m.label} style={{ background: GLASS_BG, backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)', border: GLASS_BORDER, borderRadius: 20, padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16, boxShadow: GLASS_SHADOW }}>
+          <div key={m.label} onClick={m.onClick} className={m.onClick ? 'kpi-card-click' : undefined} style={{ background: GLASS_BG, backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)', border: GLASS_BORDER, borderRadius: 20, padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16, boxShadow: GLASS_SHADOW }}>
             <div style={{ width: 50, height: 50, borderRadius: 15, background: m.grad, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 23, flex: 'none', boxShadow: '0 8px 18px rgba(0,0,0,0.12)' }}>{m.icon}</div>
             <div>
               <div style={{ fontSize: 12, color: TEXT_SUB }}>{m.label}</div>
@@ -297,7 +331,13 @@ export default function DashboardPage() {
       {/* ===== 面板区 1：服务器状态 / 健康分布 / 健康分 ===== */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: 16, marginBottom: 16 }}>
         <Panel title="服务器状态">
-          {servers.length === 0 ? <EmptyTip text="暂无服务器，请先添加" /> : servers.map((s) => {
+          {statusFilter && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, color: '#6366f1', marginBottom: 10, padding: '6px 10px', borderRadius: 10, background: 'rgba(99,102,241,0.08)' }}>
+              <span>已筛选：{BUCKET_ROWS.find((r) => r.key === statusFilter)?.label}（{shownServers.length} 台）</span>
+              <Button size="small" type="text" style={{ color: '#6366f1', fontSize: 12, padding: 0 }} onClick={() => setStatusFilter(null)}>清除筛选 ✕</Button>
+            </div>
+          )}
+          {servers.length === 0 ? <EmptyTip text="暂无服务器，请先添加" /> : shownServers.length === 0 ? <EmptyTip text="该分类下暂无服务器" /> : shownServers.map((s) => {
             const score = scores[s.id]?.score
             const details = scores[s.id]?.details || {}
             const meta = dbTypeMeta(s)
@@ -307,22 +347,35 @@ export default function DashboardPage() {
               <div key={s.id} style={{ background: 'rgba(255,255,255,0.6)', borderRadius: 14, padding: 14, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div style={{ width: 38, height: 38, borderRadius: 11, background: meta.grad, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 700, flex: 'none' }}>{meta.label}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14, color: TEXT_MAIN, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</div>
-                  <div style={{ fontSize: 11, color: TEXT_SUB }}>{s.ssh_host || '本地'}:{s.ssh_port ?? 22} · {s.skip_db ? '仅系统' : (s.db_type || '').toUpperCase()}</div>
+                  <div className="name-link" style={{ fontWeight: 700, fontSize: 14, color: TEXT_MAIN, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} onClick={() => navigate(`/server/${s.id}`)}>
+                    {s.name}
+                    {cache[s.id]?.status === 'offline' && <span style={{ color: '#dc2626', fontSize: 11, fontWeight: 800, marginLeft: 6, padding: '0 6px', borderRadius: 999, background: 'rgba(220,38,38,0.1)', border: '1px solid rgba(220,38,38,0.35)' }}>离线</span>}
+                  </div>
+                  <div style={{ fontSize: 11, color: TEXT_SUB }}>
+                    {s.ssh_host || '本地'}:{s.ssh_port ?? 22} · {s.skip_db ? '仅系统' : (s.db_type || '').toUpperCase()}
+                  </div>
                   <div style={{ display: 'flex', gap: 10, fontSize: 10, fontFamily: 'Consolas,monospace', color: TEXT_SUB, marginTop: 3, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <span style={{ color: '#6366f1' }}>连接 {details.sessions?.value ?? '—'}</span>
-                    <span>慢SQL <b onClick={() => openDetail(s, 'slow')} style={CLICK_STYLE}>{slow}</b></span>
-                    <span>死锁 <b onClick={() => openDetail(s, 'dead')} style={CLICK_STYLE}>{dead}</b></span>
+                    <span
+                      className="link-text"
+                      style={{ color: '#6366f1' }}
+                      title="点击查看活动会话"
+                      onClick={(e) => { e.stopPropagation(); setActModal(s) }}
+                    >连接 <b style={CLICK_STYLE}>{details.sessions?.value ?? '—'}</b></span>
+                    <span className="link-text" style={{ color: '#6366f1' }} title="点击查看慢SQL详情" onClick={(e) => { e.stopPropagation(); openDetail(s, 'slow') }}>慢SQL <b style={CLICK_STYLE}>{slow}</b></span>
+                    <span className="link-text" style={{ color: '#6366f1' }} title="点击查看死锁详情" onClick={(e) => { e.stopPropagation(); openDetail(s, 'dead') }}>死锁 <b style={CLICK_STYLE}>{dead}</b></span>
                     {RES_KEYS.map((k) => {
                       const d = details[k]
                       const color = resStatusColor(d?.status)
-                      // 磁盘显示最高占用盘的盘符/挂载点，悬停展示全部盘明细
+                      // 磁盘显示最高占用盘的盘符/挂载点；点击弹指标明细
                       const text = k === 'disk' && d?.label
                         ? `磁盘 ${d.value}·${d.label}`
                         : `${RES_LABELS[k]} ${d?.value ?? '—'}`
                       return (
-                        <Tooltip key={k} title={d?.detail || (k === 'disk' ? '磁盘使用率（最高占用盘）' : undefined)}>
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 6px', borderRadius: 999, background: `${color}1a`, color, border: `1px solid ${color}55`, fontWeight: 700 }}>
+                        <Tooltip key={k} title="点击查看明细">
+                          <span
+                            onClick={(e) => { e.stopPropagation(); setResModal({ server: s, key: k }) }}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 6px', borderRadius: 999, background: `${color}1a`, color, border: `1px solid ${color}55`, fontWeight: 700, cursor: 'pointer' }}
+                          >
                             {text}
                           </span>
                         </Tooltip>
@@ -330,7 +383,9 @@ export default function DashboardPage() {
                     })}
                   </div>
                 </div>
-                <div style={{ fontFamily: 'Consolas,monospace', fontSize: 22, fontWeight: 800, color: scoreColor(score), flex: 'none' }}>{score ?? '—'}</div>
+                <Tooltip title="点击查看得分构成">
+                  <div onClick={(e) => { e.stopPropagation(); setScoreModal(s) }} style={{ fontFamily: 'Consolas,monospace', fontSize: 22, fontWeight: 800, color: scoreColor(score), flex: 'none', cursor: 'pointer' }}>{score ?? '—'}</div>
+                </Tooltip>
               </div>
             )
           })}
@@ -339,20 +394,21 @@ export default function DashboardPage() {
         <Panel title="健康分布">
           {servers.length === 0 ? <EmptyTip text="暂无服务器" /> : (
             <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
-              <div style={{ width: 118, height: 118, borderRadius: '50%', flex: 'none', position: 'relative', background: `conic-gradient(#10b981 0 ${pctOf(buckets.good)}%,#f59e0b ${pctOf(buckets.good)}% ${pctOf(buckets.good) + pctOf(buckets.warn)}%,#ef4444 ${pctOf(buckets.good) + pctOf(buckets.warn)}% ${pctOf(buckets.good) + pctOf(buckets.warn) + pctOf(buckets.bad)}%,#e5e7eb ${pctOf(buckets.good) + pctOf(buckets.warn) + pctOf(buckets.bad)}% 100%)` }}>
+              <div style={{ width: 118, height: 118, borderRadius: '50%', flex: 'none', position: 'relative', background: `conic-gradient(#10b981 0 ${pctOf(buckets.good)}%,#f59e0b ${pctOf(buckets.good)}% ${pctOf(buckets.good) + pctOf(buckets.warn)}%,#ef4444 ${pctOf(buckets.good) + pctOf(buckets.warn)}% ${pctOf(buckets.good) + pctOf(buckets.warn) + pctOf(buckets.bad)}%,#e5e7eb ${pctOf(buckets.good) + pctOf(buckets.warn) + pctOf(buckets.bad)}% ${pctOf(buckets.good) + pctOf(buckets.warn) + pctOf(buckets.bad) + pctOf(buckets.none)}%,#991b1b ${pctOf(buckets.good) + pctOf(buckets.warn) + pctOf(buckets.bad) + pctOf(buckets.none)}% 100%)` }}>
                 <div style={{ position: 'absolute', inset: 14, borderRadius: '50%', background: 'rgba(255,255,255,0.88)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
                   <b style={{ fontSize: 26, fontFamily: 'Consolas,monospace', color: TEXT_MAIN }}>{avgScore}</b>
                   <span style={{ fontSize: 10, color: TEXT_SUB }}>平均分</span>
                 </div>
               </div>
               <div style={{ flex: 1, fontSize: 12, color: '#64748b' }}>
-                {[
-                  { label: '🟢 良好 ≥80', n: buckets.good },
-                  { label: '🟠 关注 60-79', n: buckets.warn },
-                  { label: '🔴 异常 <60', n: buckets.bad },
-                  { label: '⚪ 未采集', n: buckets.none },
-                ].map((r) => (
-                  <div key={r.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}><span>{r.label}</span><b style={{ color: TEXT_MAIN, fontFamily: 'Consolas,monospace' }}>{r.n}</b></div>
+                {BUCKET_ROWS.map((r) => (
+                  <div
+                    key={r.key}
+                    onClick={() => setStatusFilter(statusFilter === r.key ? null : r.key)}
+                    style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 6px', borderRadius: 8, cursor: 'pointer', background: statusFilter === r.key ? 'rgba(99,102,241,0.12)' : 'transparent', fontWeight: statusFilter === r.key ? 700 : 400 }}
+                  >
+                    <span>{r.label}</span><b style={{ color: TEXT_MAIN, fontFamily: 'Consolas,monospace' }}>{r.n}</b>
+                  </div>
                 ))}
               </div>
             </div>
@@ -366,7 +422,7 @@ export default function DashboardPage() {
                 const sc = scores[s.id]?.score
                 const h = sc == null ? 8 : Math.max(10, sc * 1.3)
                 return (
-                  <div key={s.id} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%', minWidth: 0 }}>
+                  <div key={s.id} className="clickable-row" onClick={() => navigate(`/server/${s.id}`)} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%', minWidth: 0, borderRadius: 10 }}>
                     <div style={{ fontSize: 11, fontFamily: 'Consolas,monospace', color: TEXT_MAIN, marginBottom: 4 }}>{sc ?? '—'}</div>
                     <div style={{ width: '62%', maxWidth: 36, height: h, background: `linear-gradient(180deg,${scoreColor(sc)},rgba(99,102,241,0.35))`, borderRadius: '8px 8px 3px 3px', boxShadow: '0 2px 8px rgba(99,102,241,0.2)' }} />
                     <div style={{ fontSize: 10, color: TEXT_SUB, marginTop: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{s.name}</div>
@@ -383,11 +439,11 @@ export default function DashboardPage() {
         <Panel title="数据库性能指标">
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
             {[
-              { label: '总连接数', v: totalSessions, c: '#6366f1' },
-              { label: '慢SQL', v: totalSlow, c: '#d97706' },
-              { label: '死锁', v: totalDead, c: '#dc2626' },
+              { label: '总连接数', v: totalSessions, c: '#6366f1', k: 'sessions' as const },
+              { label: '慢SQL', v: totalSlow, c: '#d97706', k: 'slow' as const },
+              { label: '死锁', v: totalDead, c: '#dc2626', k: 'dead' as const },
             ].map((x) => (
-              <div key={x.label} style={{ background: 'rgba(255,255,255,0.6)', borderRadius: 12, padding: 12, textAlign: 'center' }}>
+              <div key={x.label} className="clickable-row" onClick={() => setPerfModal(x.k)} style={{ background: 'rgba(255,255,255,0.6)', borderRadius: 12, padding: 12, textAlign: 'center' }}>
                 <div style={{ fontSize: 22, fontWeight: 800, fontFamily: 'Consolas,monospace', color: x.c }}>{x.v}</div>
                 <div style={{ fontSize: 11, color: TEXT_SUB }}>{x.label}</div>
               </div>
@@ -395,8 +451,8 @@ export default function DashboardPage() {
           </div>
           <div style={{ marginTop: 12, fontSize: 12, color: '#64748b', lineHeight: 2 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>在线率</span><b style={{ color: '#059669' }}>{pctOf(onlineCount)}%</b></div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>健康服务器</span><b style={{ color: '#059669' }}>{servers.length - buckets.none} 台</b></div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>异常服务器</span><b style={{ color: '#dc2626' }}>{buckets.bad} 台</b></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>健康服务器</span><b style={{ color: '#059669' }}>{buckets.good} 台</b></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>异常服务器</span><b style={{ color: '#dc2626' }}>{abnormalCount} 台</b></div>
           </div>
         </Panel>
 
@@ -406,9 +462,15 @@ export default function DashboardPage() {
             const score = scores[s.id]?.score
             return (
               <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: '1px solid rgba(148,163,184,0.2)' }}>
-                <span className={dotClass(!!data, score)} />
+                <span className={dotClass(data ? data.status !== 'offline' : false, score)} />
                 <span style={{ color: TEXT_MAIN, fontSize: 13, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</span>
-                <span style={{ color: TEXT_SUB, fontSize: 11, fontFamily: 'Consolas,monospace' }}>{data?.timestamp || '暂无采集'}</span>
+                {data?.status === 'offline' ? (
+                  <Tooltip title={data?.error || '采集失败'}>
+                    <span style={{ color: '#dc2626', fontSize: 11, fontWeight: 700, fontFamily: 'Consolas,monospace' }}>离线</span>
+                  </Tooltip>
+                ) : (
+                  <span style={{ color: TEXT_SUB, fontSize: 11, fontFamily: 'Consolas,monospace' }}>{data?.timestamp || '暂无采集'}</span>
+                )}
                 <Space size={0}>
                   <Button size="small" type="text" icon={<EyeOutlined />} style={{ color: '#6366f1' }} onClick={() => navigate(`/server/${s.id}`)} />
                   <Button size="small" type="text" icon={<ThunderboltOutlined />} loading={collecting === s.id} style={{ color: '#6366f1' }} onClick={() => collect(s)} />
@@ -470,6 +532,164 @@ export default function DashboardPage() {
               </table>
             </div>
           )
+        )}
+      </Modal>
+
+      {/* ===== 资源指标明细弹窗（复用详情页组件） ===== */}
+      <Modal
+        title={resModal ? `${resModal.server.name} · ${RES_LABELS[resModal.key as (typeof RES_KEYS)[number]]}明细` : ''}
+        open={!!resModal}
+        onCancel={() => setResModal(null)}
+        footer={null}
+        width={820}
+        destroyOnHidden
+      >
+        {resModal && (() => {
+          const data = cache[resModal.server.id]
+          const r = data?.os_info?.[resModal.key]
+          if (resModal.key === 'cpu') return <CpuPanel result={r} />
+          if (resModal.key === 'disk') return <DiskUsage result={r} />
+          return <QueryTable result={r} title="内存使用情况" />
+        })()}
+      </Modal>
+
+      {/* ===== 健康得分构成弹窗 ===== */}
+      <Modal
+        title={scoreModal ? `${scoreModal.name} · 健康得分构成` : ''}
+        open={!!scoreModal}
+        onCancel={() => setScoreModal(null)}
+        footer={null}
+        width={580}
+        destroyOnHidden
+      >
+        {scoreModal && (() => {
+          const h = scores[scoreModal.id]
+          const d = h?.details || {}
+          const offline = d.offline
+          const rows = [
+            { label: 'CPU 使用率', key: 'cpu', weight: 25 },
+            { label: '内存使用率', key: 'memory', weight: 25 },
+            { label: '连接数', key: 'sessions', weight: 20 },
+            { label: '慢SQL', key: 'slow_sql', weight: 15 },
+            { label: '死锁', key: 'deadlocks', weight: 15 },
+          ] as const
+          return (
+            <div style={{ fontSize: 13 }}>
+              {offline ? (
+                <div style={{ color: '#dc2626', padding: '10px 12px', background: 'rgba(220,38,38,0.08)', borderRadius: 10, marginBottom: 10 }}>
+                  ⚠️ 服务器离线：{offline.value}
+                </div>
+              ) : null}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <span style={{ color: TEXT_SUB }}>综合健康分</span>
+                <b style={{ fontSize: 24, fontFamily: 'Consolas,monospace', color: scoreColor(h?.score ?? null) }}>{h?.score ?? '—'}</b>
+              </div>
+              {rows.map((r) => {
+                const item = d[r.key]
+                const st = item?.status
+                const color = resStatusColor(st)
+                const sc = item?.score
+                return (
+                  <div key={r.key} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: '1px solid rgba(148,163,184,0.15)' }}>
+                    <span style={{ width: 96, color: TEXT_MAIN }}>{r.label}</span>
+                    <span style={{ width: 78, color: TEXT_SUB, fontFamily: 'Consolas,monospace', fontSize: 12 }}>{item?.value ?? '未采集'}</span>
+                    <div style={{ flex: 1, height: 8, borderRadius: 4, background: 'rgba(148,163,184,0.2)', overflow: 'hidden' }}>
+                      <div style={{ width: `${sc ?? 0}%`, height: '100%', borderRadius: 4, background: color }} />
+                    </div>
+                    <span style={{ width: 46, textAlign: 'right', fontFamily: 'Consolas,monospace', color, fontWeight: 700 }}>{sc ?? '—'}</span>
+                    <span style={{ width: 42, textAlign: 'right', color: TEXT_SUB, fontSize: 11 }}>×{r.weight}</span>
+                  </div>
+                )
+              })}
+              <div style={{ marginTop: 10, fontSize: 11, color: TEXT_SUB }}>得分 = Σ(单项得分 × 权重) ÷ 总权重，仅统计已启用的采集项</div>
+            </div>
+          )
+        })()}
+      </Modal>
+
+      {/* ===== 资源告警明细弹窗 ===== */}
+      <Modal
+        title="资源告警明细"
+        open={alertsOpen}
+        onCancel={() => setAlertsOpen(false)}
+        footer={null}
+        width={620}
+        destroyOnHidden
+      >
+        {(() => {
+          const list = servers.flatMap((s) => {
+            const d = scores[s.id]?.details || {}
+            return RES_KEYS.filter((k) => {
+              const st = d[k]?.status
+              return st === 'warning' || st === 'danger'
+            }).map((k) => ({ server: s, key: k, item: d[k]! }))
+          })
+          if (list.length === 0) {
+            return <Empty description="当前无资源告警 🎉" />
+          }
+          return list.map(({ server: s, key: k, item }) => {
+            const color = resStatusColor(item.status)
+            return (
+              <div
+                key={s.id + k}
+                className="clickable-row"
+                onClick={() => { setAlertsOpen(false); navigate(`/server/${s.id}`) }}
+                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', borderRadius: 10, borderBottom: '1px solid rgba(148,163,184,0.15)' }}
+              >
+                <span style={{ flex: 1, color: TEXT_MAIN, fontWeight: 600 }}>{s.name}</span>
+                <span style={{ color, fontWeight: 700, fontFamily: 'Consolas,monospace' }}>{RES_LABELS[k]} {item.value}</span>
+                <span style={{ fontSize: 11, padding: '1px 8px', borderRadius: 999, color, background: `${color}1a`, border: `1px solid ${color}55` }}>
+                  {item.status === 'danger' ? '异常' : '警告'}
+                </span>
+              </div>
+            )
+          })
+        })()}
+      </Modal>
+
+      {/* ===== 性能指标分台明细弹窗 ===== */}
+      <Modal
+        title={perfModal ? { sessions: '总连接数 · 各服务器明细', slow: '慢SQL · 各服务器明细', dead: '死锁 · 各服务器明细' }[perfModal] : ''}
+        open={!!perfModal}
+        onCancel={() => setPerfModal(null)}
+        footer={null}
+        width={520}
+        destroyOnHidden
+      >
+        {perfModal && servers.map((s) => {
+          const d = scores[s.id]?.details || {}
+          const v = perfModal === 'sessions' ? d.sessions?.value : perfModal === 'slow' ? d.slow_sql?.value : d.deadlocks?.value
+          return (
+            <div
+              key={s.id}
+              className="clickable-row"
+              onClick={() => { setPerfModal(null); navigate(`/server/${s.id}`) }}
+              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 12px', borderRadius: 10, borderBottom: '1px solid rgba(148,163,184,0.15)' }}
+            >
+              <span style={{ flex: 1, color: TEXT_MAIN, fontWeight: 600 }}>{s.name}</span>
+              {cache[s.id]?.status === 'offline' && <span style={{ fontSize: 11, padding: '1px 8px', borderRadius: 999, color: '#dc2626', background: 'rgba(220,38,38,0.1)', border: '1px solid rgba(220,38,38,0.35)' }}>离线</span>}
+              <b style={{ fontFamily: 'Consolas,monospace', fontSize: 18, color: perfModal === 'dead' ? '#dc2626' : perfModal === 'slow' ? '#d97706' : '#6366f1' }}>{v ?? '—'}</b>
+            </div>
+          )
+        })}
+        {perfModal && servers.length === 0 && <EmptyTip text="暂无服务器" />}
+      </Modal>
+
+      {/* ===== 活动会话弹窗 ===== */}
+      <Modal
+        title={actModal ? `${actModal.name} · 活动会话` : ''}
+        open={!!actModal}
+        onCancel={() => setActModal(null)}
+        footer={null}
+        width={860}
+        destroyOnHidden
+      >
+        {actModal && (
+          <QueryTable
+            result={cache[actModal.id]?.db_queries?.performance?.active_queries}
+            title="活动会话（当前 SQL 非空的会话）"
+            columnLabels={columnLabels}
+          />
         )}
       </Modal>
     </div>

@@ -7,6 +7,7 @@ import { App as AntApp } from 'antd'
 import { FileExcelOutlined, DeleteOutlined } from '@ant-design/icons'
 import { api, downloadFile } from '../api/client'
 import type { Server, ExportHistoryItem } from '../api/types'
+import { useServerCache } from '../hooks/useSSE'
 
 const CATEGORIES = [
   { id: 'basic_info', label: '基础信息' },
@@ -27,6 +28,7 @@ const OS_CHECKS = [
 
 export default function ReportsPage() {
   const { message } = AntApp.useApp()
+  const cache = useServerCache()
   const [servers, setServers] = useState<Server[]>([])
   const [selected, setSelected] = useState<string[]>([])
   const [categories, setCategories] = useState<string[]>(['basic_info', 'performance'])
@@ -56,6 +58,11 @@ export default function ReportsPage() {
   const allSkipDb = useMemo(
     () => selected.length > 0 && selected.every((sid) => servers.find((s) => s.id === sid)?.skip_db),
     [selected, servers],
+  )
+  // 所选服务器中处于离线的台数
+  const offlineSelected = useMemo(
+    () => selected.filter((sid) => cache[sid]?.status === 'offline'),
+    [selected, cache],
   )
 
   const doExport = async () => {
@@ -151,8 +158,13 @@ export default function ReportsPage() {
             placeholder="选择要导出的服务器"
             value={selected}
             onChange={setSelected}
-            options={servers.map((s) => ({ value: s.id, label: s.name }))}
+            options={servers.map((s) => ({ value: s.id, label: `${s.name}${cache[s.id]?.status === 'offline' ? ' · 离线' : ''}` }))}
           />
+          {offlineSelected.length > 0 && (
+            <div style={{ color: '#d97706', fontSize: 12, background: 'rgba(217,119,6,0.08)', border: '1px solid rgba(217,119,6,0.3)', borderRadius: 8, padding: '6px 10px', marginTop: 8 }}>
+              ⚠️ 已选中 {offlineSelected.length} 台离线服务器，导出的报告内容可能为空或不完整
+            </div>
+          )}
         </div>
 
         <div style={{ marginBottom: 16 }}>

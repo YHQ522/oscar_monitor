@@ -61,6 +61,53 @@ body,
 .dash-dot-red { background: #ef4444; animation: dash-pulse-red 1.1s ease-out infinite; }
 .dash-dot-gray { background: #9ca3af; }
 
+/* 首页可点击元素（详情入口） */
+.clickable-row {
+  cursor: pointer;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+.clickable-row:hover {
+  background: rgba(99, 102, 241, 0.10) !important;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.15);
+}
+.kpi-card-click {
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.kpi-card-click:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px rgba(99, 102, 241, 0.25);
+}
+
+/* 可点击的 IP 地址（跳转服务器详情页） */
+.ip-link {
+  cursor: pointer;
+  width: fit-content;
+  transition: color 0.15s ease;
+}
+.ip-link:hover {
+  color: #6366f1 !important;
+  text-decoration: underline;
+}
+
+/* 可点击的服务器名称（跳转服务器详情页） */
+.name-link {
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+.name-link:hover {
+  color: #6366f1 !important;
+}
+
+/* 可点击的文本（如 慢SQL/死锁） */
+.link-text {
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+.link-text:hover {
+  color: #6366f1 !important;
+}
+
 .dash-server-card {
   transition: transform 0.2s ease, box-shadow 0.2s ease;
   border-radius: 12px;

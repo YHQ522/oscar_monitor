@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import re
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -19,6 +20,31 @@ from .server_service import ServerService, get_server_service
 from .trend import TrendStore, get_trend_store
 
 logger = logging.getLogger("oscar_monitor.scheduler")
+
+
+def _all_failed_error(result: dict[str, Any]) -> str:
+    """采集结果全部检查项均失败时返回首个错误信息，否则返回空串。
+
+    无任何检查项（未勾选采集）不算离线；任一检查成功即视为在线。
+    """
+    osi = result.get("os_info") or {}
+    dq = result.get("db_queries") or {}
+    any_ok = False
+    first_err = ""
+    for c in osi.values():
+        if c.get("error"):
+            first_err = first_err or str(c["error"])
+        else:
+            any_ok = True
+    for cat in dq.values():
+        for q in cat.values():
+            if q.get("error"):
+                first_err = first_err or str(q["error"])
+            else:
+                any_ok = True
+    if any_ok or (not osi and not dq):
+        return ""
+    return first_err
 
 
 class CollectScheduler:
@@ -89,16 +115,38 @@ class CollectScheduler:
 
     # ── 采集 ──
     def collect_one(self, server: dict[str, Any]) -> dict[str, Any]:
-        result = collect_all(
-            server,
-            server.get("enabled_categories"),
-            server.get("enabled_os_checks"),
-        )
+        try:
+            result = collect_all(
+                server,
+                server.get("enabled_categories"),
+                server.get("enabled_os_checks"),
+            )
+        except Exception as e:  # noqa: BLE001
+            # SSH 层完全失败（连接被拒/超时/认证失败）→ 写离线快照，前端据此显示离线
+            self._mark_offline(server, str(e))
+            raise
+        # 全部检查项均报错（服务可达但采集全部失败）同样视为离线
+        first_err = _all_failed_error(result)
+        if first_err:
+            self._mark_offline(server, first_err)
+            return result
         self.cache.set(server.get("id"), result)
         self._persist_errors(server, result)
         self.trend.record(server.get("id"), result)
         self._maybe_notify(server, result)
         return result
+
+    def _mark_offline(self, server: dict[str, Any], error: str) -> None:
+        """写入离线快照：保留时间戳与错误信息，清空指标，供前端/健康分判定离线。"""
+        self.cache.set(server.get("id"), {
+            "server": server.get("id"),
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "status": "offline",
+            "error": (error or "未知错误")[:200],
+            "os_info": {},
+            "db_queries": {},
+            "apps": [],
+        })
 
     def _maybe_notify(self, server: dict[str, Any], result: dict[str, Any]) -> None:
         """采集后评估：健康分过低或存在错误时发送告警通知（不影响采集主流程）。"""

@@ -62,6 +62,8 @@ export interface QueryResult {
 export interface CollectData {
   server: string
   timestamp: string
+  status?: string
+  error?: string
   os_info: Record<string, QueryResult & { output?: string; exit_code?: number; load_1m?: string }>
   db_queries: Record<string, Record<string, QueryResult>>
   apps: { name: string; running: boolean; status: string }[]

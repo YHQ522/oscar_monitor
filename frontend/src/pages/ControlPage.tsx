@@ -5,6 +5,7 @@ import { Card, Button, Tag, Space, Spin, Empty, Modal } from 'antd'
 import { App as AntApp } from 'antd'
 import { PlayCircleOutlined, ReloadOutlined, StopOutlined, EyeOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
+import { useServerCache } from '../hooks/useSSE'
 import { useAuth } from '../store/auth'
 import type { Server } from '../api/types'
 
@@ -34,6 +35,7 @@ function ControlButton({ action, onClick, disabled }: { action: string; onClick:
 export default function ControlPage() {
   const user = useAuth((s) => s.user)
   const { message, modal } = AntApp.useApp()
+  const cache = useServerCache()
   const [servers, setServers] = useState<Server[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
@@ -170,58 +172,66 @@ export default function ControlPage() {
           {servers.filter((s) => !s.skip_db).length === 0 && (
             <Empty description="暂无数据库服务（仅系统监控的服务器无需数据库启停）" />
           )}
-          {servers.filter((s) => !s.skip_db).map((s) => (
+          {servers.filter((s) => !s.skip_db).map((s) => {
+            const offline = cache[s.id]?.status === 'offline'
+            return (
             <div key={s.id} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f0f0f0', paddingBottom: 8 }}>
               <Space>
                 <Tag color="purple">{s.db_type.toUpperCase()}</Tag>
                 <b>{s.name}</b>
                 <span style={{ color: '#8a94a6', fontSize: 12 }}>{s.ssh_host}</span>
+                {offline ? <Tag color="red">离线</Tag> : cache[s.id] ? <Tag color="green">在线</Tag> : <Tag>未采集</Tag>}
               </Space>
               <Space wrap>
                 <ControlButton
                   action="status"
-                  disabled={busy !== null}
+                  disabled={busy !== null || offline}
                   onClick={() => run(s, 'db', 'status')}
                 />
                 {canExec && (
                   <>
-                    <ControlButton action="start" disabled={busy !== null} onClick={() => confirmAction(s, 'db', 'start')} />
-                    <ControlButton action="stop" disabled={busy !== null} onClick={() => confirmAction(s, 'db', 'stop')} />
-                    <ControlButton action="restart" disabled={busy !== null} onClick={() => confirmAction(s, 'db', 'restart')} />
+                    <ControlButton action="start" disabled={busy !== null || offline} onClick={() => confirmAction(s, 'db', 'start')} />
+                    <ControlButton action="stop" disabled={busy !== null || offline} onClick={() => confirmAction(s, 'db', 'stop')} />
+                    <ControlButton action="restart" disabled={busy !== null || offline} onClick={() => confirmAction(s, 'db', 'restart')} />
                   </>
                 )}
               </Space>
             </div>
-          ))}
+            )
+          })}
         </div>
       </Card>
 
       {Object.entries(groups).map(([group, items]) => (
         <Card key={group} title={`应用组：${group}`} size="small">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {items.map(({ server, app }) => (
+            {items.map(({ server, app }) => {
+              const offline = cache[server.id]?.status === 'offline'
+              return (
               <div key={`${server.id}-${app.name}`} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f0f0f0', paddingBottom: 8 }}>
                 <Space>
                   <Tag>{server.name}</Tag>
                   <b>{app.name}</b>
                   <span style={{ color: '#8a94a6', fontSize: 12 }}>端口 {app.port}</span>
+                  {offline ? <Tag color="red">离线</Tag> : cache[server.id] ? <Tag color="green">在线</Tag> : <Tag>未采集</Tag>}
                 </Space>
                 <Space wrap>
                   <ControlButton
                     action="status"
-                    disabled={busy !== null}
+                    disabled={busy !== null || offline}
                     onClick={() => run(server, 'app', 'status', app.name)}
                   />
                   {canExec && (
                     <>
-                      <ControlButton action="start" disabled={busy !== null} onClick={() => confirmAction(server, 'app', 'start', app.name)} />
-                      <ControlButton action="stop" disabled={busy !== null} onClick={() => confirmAction(server, 'app', 'stop', app.name)} />
-                      <ControlButton action="restart" disabled={busy !== null} onClick={() => confirmAction(server, 'app', 'restart', app.name)} />
+                      <ControlButton action="start" disabled={busy !== null || offline} onClick={() => confirmAction(server, 'app', 'start', app.name)} />
+                      <ControlButton action="stop" disabled={busy !== null || offline} onClick={() => confirmAction(server, 'app', 'stop', app.name)} />
+                      <ControlButton action="restart" disabled={busy !== null || offline} onClick={() => confirmAction(server, 'app', 'restart', app.name)} />
                     </>
                   )}
                 </Space>
               </div>
-            ))}
+              )
+            })}
           </div>
         </Card>
       ))}

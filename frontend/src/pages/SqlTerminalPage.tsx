@@ -9,6 +9,7 @@ import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter'
 import sqlLang from 'react-syntax-highlighter/dist/esm/languages/prism/sql'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { api, ApiError } from '../api/client'
+import { useServerCache } from '../hooks/useSSE'
 import QueryTable from '../components/QueryTable'
 import type { Server, QueryResult } from '../api/types'
 
@@ -86,6 +87,7 @@ function saveHistory(sqls: string[]) {
 
 export default function SqlTerminalPage() {
   const { message, modal } = AntApp.useApp()
+  const cache = useServerCache()
   const [servers, setServers] = useState<Server[]>([])
   const [serverId, setServerId] = useState<string>('')
   const [sql, setSql] = useState(SAFE_PREFIX + 'SELECT 1;')
@@ -184,12 +186,17 @@ export default function SqlTerminalPage() {
             placeholder="选择服务器"
             value={serverId || undefined}
             onChange={setServerId}
-            options={servers.map((s) => ({ value: s.id, label: `${s.name} (${s.db_type})` }))}
+            options={servers.map((s) => ({ value: s.id, label: `${s.name} (${s.db_type})${cache[s.id]?.status === 'offline' ? ' · 离线' : ''}` }))}
           />
           <Button type="primary" icon={<PlayCircleOutlined />} onClick={() => run()} loading={running}>
             执行 (Ctrl+Enter)
           </Button>
         </Space>
+        {currentServer && cache[currentServer.id]?.status === 'offline' && (
+          <div style={{ color: '#dc2626', fontSize: 12, background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.25)', borderRadius: 8, padding: '6px 10px', marginBottom: 12 }}>
+            ⚠️ {currentServer.name} 当前处于离线状态（{cache[currentServer.id]?.error || '采集失败'}），执行 SQL 可能超时或失败
+          </div>
+        )}
         {snippets.length > 0 && (
           <div style={{ marginBottom: 12 }}>
             <div style={{ fontSize: 12, color: '#8a94a6', marginBottom: 4 }}>

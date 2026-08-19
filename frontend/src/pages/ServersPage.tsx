@@ -5,6 +5,7 @@ import { App as AntApp } from 'antd'
 import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, DatabaseOutlined, SearchOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
+import { useServerCache } from '../hooks/useSSE'
 import { useAuth } from '../store/auth'
 import type { Server } from '../api/types'
 
@@ -12,6 +13,7 @@ export default function ServersPage() {
   const navigate = useNavigate()
   const user = useAuth((s) => s.user)
   const { message } = AntApp.useApp()
+  const cache = useServerCache()
   const [servers, setServers] = useState<Server[]>([])
   const [loading, setLoading] = useState(true)
   const [kw, setKw] = useState('')
@@ -82,6 +84,15 @@ export default function ServersPage() {
       title: '数据库类型',
       dataIndex: 'db_type',
       render: (v: string, r: Server) => (r.skip_db ? <Tag>—</Tag> : <Tag color="blue">{v.toUpperCase()}</Tag>),
+    },
+    {
+      title: '状态',
+      width: 90,
+      render: (_: unknown, r: Server) => {
+        const d = cache[r.id]
+        if (!d) return <Tag>未采集</Tag>
+        return d.status === 'offline' ? <Tag color="red">离线</Tag> : <Tag color="green">在线</Tag>
+      },
     },
     { title: 'SSH 地址', render: (_: unknown, r: Server) => `${r.ssh_host}:${r.ssh_port}` },
     { title: '数据库地址', render: (_: unknown, r: Server) => (r.skip_db ? '—' : `${r.db_host}:${r.db_port}`) },
