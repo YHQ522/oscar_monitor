@@ -7,7 +7,7 @@ export default function DiskUsage({ result }: { result?: QueryResult }) {
   const items = useMemo(() => {
     if (!result?.rows?.length) return []
     const cols = result.columns || []
-    const pctIdx = cols.findIndex((c) => /使用率|use%|used%/i.test(String(c)))
+    const pctIdx = cols.findIndex((c) => /使用率|占用率|已用%|use%|used%/i.test(String(c)))
     const nameIdx = cols.findIndex((c) => /文件系统|filesystem|挂载点|mounted|name|盘符|drive|letter/i.test(String(c)))
     if (pctIdx < 0) return []
     return result.rows
@@ -28,8 +28,8 @@ export default function DiskUsage({ result }: { result?: QueryResult }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {items.map((it) => (
-        <div key={it.name}>
+      {items.map((it, idx) => (
+        <div key={`${it.name}-${idx}`}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 2 }}>
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name}</span>
             <span>{it.pct}%</span>

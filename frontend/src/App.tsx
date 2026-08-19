@@ -73,8 +73,8 @@ export default function App() {
             <Route path="control" element={<RequirePerm perm="control_view"><ControlPage /></RequirePerm>} />
             <Route path="users" element={<RequirePerm perm="admin"><UsersPage /></RequirePerm>} />
             <Route path="config" element={<RequirePerm perm="admin"><ConfigPage /></RequirePerm>} />
-            <Route path="reports" element={<RequirePerm perm="admin"><ReportsPage /></RequirePerm>} />
-            <Route path="sql-terminal" element={<RequirePerm perm="admin"><SqlTerminalPage /></RequirePerm>} />
+            <Route path="reports" element={<RequirePerm perm="reports_view"><ReportsPage /></RequirePerm>} />
+            <Route path="sql-terminal" element={<RequirePerm perm="sql_terminal"><SqlTerminalPage /></RequirePerm>} />
             <Route path="profile" element={<ProfilePage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

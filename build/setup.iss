@@ -55,7 +55,7 @@ ReadyLabel2a=点击"安装"开始安装，点击"上一步"检查或修改设置
 ReadyLabel2b=点击"安装"继续安装。
 FinishedLabel={#MyAppName} 已安装完成。
 FinishedHeadingLabel={#MyAppName} 安装完成。
-ClickFinish=安装完成。程序启动后请使用浏览器访问（默认账号 admin / admin123，请及时修改）。
+ClickFinish=安装完成。服务已在后台运行（Windows 服务：oscar-monitor），请使用浏览器访问（默认账号 admin / admin123，请及时修改）。
 ButtonNext=下一步(&N) >
 ButtonInstall=安装(&I)
 ButtonFinish=完成(&F)
@@ -94,15 +94,19 @@ AutoStart=开机自动启动(&S)
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "快捷方式:"
-Name: "autostart"; Description: "{cm:AutoStart}"; GroupDescription: "附加功能:"
 
 [Files]
 ; 单文件可执行程序（已内嵌后端 + 前端产物，免 Python/Node）
 Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+; NSSM（服务管理器）：按系统架构安装对应版本，用于注册后台 Windows 服务
+Source: "nssm\win64\nssm.exe"; DestDir: "{app}\bin"; Flags: ignoreversion; Check: IsWin64
+Source: "nssm\win32\nssm.exe"; DestDir: "{app}\bin"; Flags: ignoreversion; Check: "not IsWin64"
 
 [Dirs]
 ; 数据目录（安装到 ProgramData，运行时可写，所有用户共享）
 Name: "{commonappdata}\OscarMonitor\data"
+; 服务日志目录（nssm AppStdout/AppStderr 输出）
+Name: "{commonappdata}\OscarMonitor\logs"
 
 ; 让程序把数据写到可写目录（Program Files 安装位置运行时不具备写权限）
 ; 通过系统环境变量 OSCAR_DATA_DIR 注入（pydantic-settings 前缀 OSCAR_）
@@ -114,12 +118,6 @@ Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{a
 Name: "{group}\卸载 {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
-[Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "启动 {#MyAppName}"; Flags: nowait postinstall skipifsilent shellexec
-
-[Registry]
-; 可选：开机自动启动（当前用户）
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "OscarMonitor"; ValueData: """{app}\{#MyAppExeName}"""; Flags: uninsdeletevalue; Tasks: autostart
 
 [UninstallDelete]
 Type: dirifempty; Name: "{commonappdata}\OscarMonitor\data"
@@ -130,12 +128,68 @@ Type: dirifempty; Name: "{app}"
 var
   PortPage: TInputQueryWizardPage;
 
+const
+  SvcName = 'oscar-monitor';
+
 // 安装前/卸载时结束正在运行的进程，避免文件占用
 procedure KillRunningApp();
 var
   ResultCode: Integer;
 begin
   Exec('taskkill', '/f /im oscar-monitor.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+// 调用 nssm（安装/升级期间 nssm 位于 {app}\bin）
+procedure NssmRun(Params: String);
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{app}\bin\nssm.exe'), Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+// 旧安装目录下的 nssm 路径（升级安装时用于停止旧服务）
+function OldNssmPath(): String;
+var
+  OldDir: String;
+begin
+  Result := '';
+  if RegQueryStringValue(HKLM, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#MyAppId}_is1', 'InstallLocation', OldDir) then
+    Result := OldDir + '\bin\nssm.exe';
+end;
+
+// 停止服务（升级安装覆盖文件前调用）：优先当前安装目录，回退旧目录，最后兜底杀进程
+procedure StopService();
+var
+  Nssm: String;
+  ResultCode: Integer;
+begin
+  Nssm := ExpandConstant('{app}\bin\nssm.exe');
+  if not FileExists(Nssm) then
+    Nssm := OldNssmPath();
+  if Nssm <> '' then
+    Exec(Nssm, 'stop ' + SvcName, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  KillRunningApp();
+end;
+
+// 注册为 Windows 后台服务（NSSM）：开机自启 + 崩溃自动重启 + 日志落盘
+procedure InstallService();
+var
+  LogDir: String;
+begin
+  LogDir := ExpandConstant('{commonappdata}\OscarMonitor\logs');
+  ForceDirectories(LogDir);
+  // 幂等：先移除同名旧服务（不存在时报错，忽略）
+  NssmRun('remove ' + SvcName + ' confirm');
+  NssmRun('install ' + SvcName + ' "' + ExpandConstant('{app}\{#MyAppExeName}') + '"');
+  NssmRun('set ' + SvcName + ' AppDirectory "' + ExpandConstant('{app}') + '"');
+  NssmRun('set ' + SvcName + ' AppStdout "' + LogDir + '\out.log"');
+  NssmRun('set ' + SvcName + ' AppStderr "' + LogDir + '\err.log"');
+  NssmRun('set ' + SvcName + ' AppRotateFiles 1');
+  NssmRun('set ' + SvcName + ' AppRotateBytes 10485760');
+  // 数据目录通过服务环境变量注入，不依赖系统环境变量广播（首次安装免重启即生效）
+  NssmRun('set ' + SvcName + ' AppEnvironmentExtra OSCAR_DATA_DIR=' + ExpandConstant('{commonappdata}\OscarMonitor\data'));
+  NssmRun('set ' + SvcName + ' Start SERVICE_AUTO_START');
+  NssmRun('start ' + SvcName);
 end;
 
 // 端口输入页（安装时指定端口；静默安装用 /Port=8080 传入）
@@ -166,31 +220,40 @@ begin
   end;
 end;
 
-// 安装完成后，若尚无配置文件则写入初始端口（升级安装保留已有配置）
+// 安装完成后写入/更新监听端口。
+// 全新安装：创建 {"port": X}；升级安装：用 PowerShell 仅更新 port 字段（保留其余配置）。
+// 写入使用无 BOM 的 UTF-8，避免后端 json.load 因 BOM 解析失败。
 procedure WritePortConfig();
 var
-  CfgPath, PortStr: String;
+  CfgPath, PortStr, PsCmd: String;
+  ResultCode: Integer;
 begin
   CfgPath := ExpandConstant('{commonappdata}\OscarMonitor\data\config.json');
-  if FileExists(CfgPath) then
-    Exit;
   ForceDirectories(ExpandConstant('{commonappdata}\OscarMonitor\data'));
   PortStr := Trim(PortPage.Values[0]);
   if PortStr = '' then
     PortStr := '5080';
-  SaveStringToFile(CfgPath, '{"port": ' + PortStr + '}', False);
+  PsCmd := '-NoProfile -ExecutionPolicy Bypass -Command "$c=@{port=' + PortStr + '};$p=''' + CfgPath + ''';if(Test-Path $p){$o=Get-Content -Raw $p|ConvertFrom-Json -ErrorAction SilentlyContinue;if($o){$o|Add-Member -Force -NotePropertyName port -NotePropertyValue ([int]' + PortStr + ');$c=$o}};[IO.File]::WriteAllText($p,($c|ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))"';
+  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), PsCmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssInstall then
-    KillRunningApp();
+    StopService();
   if CurStep = ssPostInstall then
+  begin
     WritePortConfig();
+    InstallService();
+  end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usUninstall then
+  begin
+    NssmRun('stop ' + SvcName);
+    NssmRun('remove ' + SvcName + ' confirm');
     KillRunningApp();
+  end;
 end;

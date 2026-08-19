@@ -45,3 +45,6 @@ frontend/.vite/
 
 # Environment
 .env
+
+# TypeScript build cache
+*.tsbuildinfo

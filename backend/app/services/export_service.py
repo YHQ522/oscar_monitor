@@ -14,7 +14,7 @@ from openpyxl.utils import get_column_letter
 
 from ..adapters import get_query_sets
 from ..config import Settings
-from ..core.constants import OS_CHECK_LABELS, QUERY_LABELS
+from ..core.constants import OS_CHECK_LABELS, QUERY_LABELS, translate_columns
 from .cache import CacheStore, get_cache
 from .server_service import ServerService, get_server_service
 
@@ -63,7 +63,7 @@ class ExportService:
             for ck, cr in os_info.items():
                 writer.writerow([OS_CHECK_LABELS.get(ck, ck)])
                 if cr.get("columns") and cr.get("rows"):
-                    writer.writerow(cr["columns"])
+                    writer.writerow(translate_columns(cr["columns"]))
                     for row in cr["rows"]:
                         writer.writerow(row)
                 elif cr.get("output"):
@@ -77,7 +77,7 @@ class ExportService:
             for qn, qr in queries.items():
                 writer.writerow([QUERY_LABELS.get(qn, qn)])
                 if qr.get("columns") and qr.get("rows"):
-                    writer.writerow(qr["columns"])
+                    writer.writerow(translate_columns(qr["columns"]))
                     for row in qr["rows"]:
                         writer.writerow(row)
                 writer.writerow([])
@@ -268,7 +268,7 @@ class ExportService:
         if not qr or not qr.get("columns"):
             ws.cell(row=row, column=1, value="(无数据)").font = Font(color="94A3B8", size=10)
             return row + 1
-        for ci, col in enumerate(qr["columns"], 1):
+        for ci, col in enumerate(translate_columns(qr["columns"]), 1):
             cell = ws.cell(row=row, column=ci, value=str(col))
             cell.font = hf
             cell.fill = hfill

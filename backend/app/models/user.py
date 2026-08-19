@@ -11,6 +11,8 @@ PERMISSIONS: dict[str, str] = {
     "servers_edit": "服务管理(编辑)",
     "control_view": "启停管控(查看)",
     "control_exec": "启停管控(执行)",
+    "sql_terminal": "SQL终端(只读)",
+    "reports_view": "巡检报表(导出)",
     "admin": "系统管理",
 }
 

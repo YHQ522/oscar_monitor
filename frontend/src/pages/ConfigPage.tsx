@@ -1,6 +1,6 @@
 // 系统配置：日志库 + 全局参数 + 告警通知
 import { useEffect, useState } from 'react'
-import { Card, Form, Input, InputNumber, Select, Switch, Button, Space, Divider, Descriptions, Tag, Alert } from 'antd'
+import { Card, Form, Input, InputNumber, Select, Switch, Button, Space, Divider, Tag, Alert, Tabs, Row, Col } from 'antd'
 import { App as AntApp } from 'antd'
 import { SaveOutlined, ApiOutlined, SendOutlined, BellOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
@@ -37,6 +37,7 @@ export default function ConfigPage() {
           log_enabled: c.log_enabled,
           log_retention_days: c.log_retention_days,
           collect_workers: c.collect_workers,
+          auto_collect_interval: c.auto_collect_interval,
           port: c.port,
           trend_retention_days: c.trend_retention_days,
           ssh_connect_timeout: c.ssh_connect_timeout,
@@ -96,6 +97,7 @@ export default function ConfigPage() {
         log_enabled: values.log_enabled,
         log_retention_days: values.log_retention_days,
         collect_workers: values.collect_workers,
+        auto_collect_interval: values.auto_collect_interval,
         port: values.port,
         trend_retention_days: values.trend_retention_days,
         ssh_connect_timeout: values.ssh_connect_timeout,
@@ -103,6 +105,9 @@ export default function ConfigPage() {
         notify,
       })
       setCfg(resp)
+      // 保存成功后清空密码输入框，避免旧文本残留导致下次测试/保存误用
+      formDb.setFieldsValue({ pass: '', ssh_pass: '' })
+      formNotify.setFieldsValue({ email_smtp_pass: '' })
       message.success('配置已保存')
     } catch (e) {
       message.error((e as Error).message)
@@ -187,184 +192,282 @@ export default function ConfigPage() {
     }
   }
 
+  // 生效配置摘要（底部操作栏展示）
+  const summaryTags = [
+    { label: '日志持久化', value: cfg.log_enabled ? '已启用' : '未启用', blue: !!cfg.log_enabled },
+    { label: '日志保留', value: cfg.log_retention_days != null ? `${cfg.log_retention_days} 天` : '-' },
+    { label: '采集间隔', value: cfg.auto_collect_interval != null ? `${cfg.auto_collect_interval}s` : '-' },
+    { label: '并发线程', value: cfg.collect_workers ?? '-' },
+    { label: '服务端口', value: String(cfg.port ?? 5080) },
+    { label: '趋势保留', value: cfg.trend_retention_days != null ? `${cfg.trend_retention_days} 天` : '-' },
+    { label: 'SSH 超时', value: cfg.ssh_connect_timeout ? `${cfg.ssh_connect_timeout}s/${cfg.ssh_exec_timeout ?? '-'}s` : '-' },
+    { label: '告警', value: cfg.notify?.enabled ? '已启用' : '未启用', blue: !!cfg.notify?.enabled },
+  ]
+
+  const colProps = { xs: 24, md: 12 }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <h2 style={{ margin: 0 }}>系统配置</h2>
+      <div style={{ fontSize: 12, color: '#8a94a6', marginTop: -12 }}>
+        存储后端：{cfg.storage_backend === 'sqlite' ? 'SQLite 数据库' : 'JSON 文件'}（启动时通过 OSCAR_STORAGE_BACKEND 环境变量切换）
+      </div>
 
-      <Alert
-        type="info"
-        showIcon
-        message={`当前存储后端：${cfg.storage_backend === 'sqlite' ? 'SQLite 数据库' : 'JSON 文件'}`}
-        description="存储后端在启动时通过 OSCAR_STORAGE_BACKEND 环境变量决定：json（默认）或 sqlite。"
+      <Tabs
+        items={[
+          {
+            key: 'db',
+            label: '日志持久化数据库',
+            children: (
+              <Card size="small">
+                <Form form={formDb} layout="vertical" initialValues={{ db_type: 'oscar', port: 2003, user: 'SYSDBA', dbname: 'OSRDB', isql: 'isql', ssh_port: 22, ssh_user: 'root' }}>
+                  <Divider orientation="left">数据库连接</Divider>
+                  <Row gutter={[24, 0]}>
+                    <Col {...colProps}>
+                      <Form.Item name="db_type" label="数据库类型">
+                        <Select
+                          options={[{ value: 'oscar', label: 'Oscar (神通)' }, { value: 'mysql', label: 'MySQL' }, { value: 'postgresql', label: 'PostgreSQL' }, { value: 'oracle', label: 'Oracle' }]}
+                          onChange={onDbTypeChange}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col {...colProps}>
+                      <Form.Item name="host" label="主机">
+                        <Input placeholder="127.0.0.1" />
+                      </Form.Item>
+                    </Col>
+                    <Col {...colProps}>
+                      <Form.Item name="port" label="端口">
+                        <InputNumber min={1} max={65535} style={{ width: '100%' }} />
+                      </Form.Item>
+                    </Col>
+                    <Col {...colProps}>
+                      <Form.Item name="user" label="用户">
+                        <Input />
+                      </Form.Item>
+                    </Col>
+                    <Col {...colProps}>
+                      <Form.Item name="pass" label="密码" extra={cfg.log_db?.pass ? '已保存密码，留空保持' : undefined}>
+                        <Input.Password placeholder={cfg.log_db?.pass ? '（已保存）' : ''} />
+                      </Form.Item>
+                    </Col>
+                    <Col {...colProps}>
+                      <Form.Item name="dbname" label="数据库名">
+                        <Input />
+                      </Form.Item>
+                    </Col>
+                    <Col {...colProps}>
+                      <Form.Item name="isql" label="CLI 命令">
+                        <Input placeholder="isql" />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+
+                  <Divider orientation="left">SSH 隧道（可选）</Divider>
+                  <Alert
+                    type="info"
+                    showIcon
+                    style={{ marginBottom: 16 }}
+                    message="什么情况下需要填 SSH？"
+                    description={
+                      <>
+                        当日志库在<strong>远程服务器</strong>、且监控机无法直接连接数据库（本机未安装 CLI 工具或数据库端口不对外开放）时，填写下方 SSH 主机与账号。
+                        采集端会先 SSH 登录<strong>日志库所在服务器</strong>，再在其本机执行 CLI 读写日志表；留空则在本机直接连接。
+                        填了 SSH 后，上方「数据库连接」的 host 应填日志库所在服务器的<strong>本地地址</strong>（如 127.0.0.1）。
+                      </>
+                    }
+                  />
+                  <Row gutter={[24, 0]}>
+                    <Col {...colProps}>
+                      <Form.Item name="ssh_host" label="SSH 主机">
+                        <Input placeholder="留空表示本机直接连接" />
+                      </Form.Item>
+                    </Col>
+                    <Col {...colProps}>
+                      <Form.Item name="ssh_port" label="SSH 端口">
+                        <InputNumber min={1} max={65535} style={{ width: '100%' }} />
+                      </Form.Item>
+                    </Col>
+                    <Col {...colProps}>
+                      <Form.Item name="ssh_user" label="SSH 用户">
+                        <Input />
+                      </Form.Item>
+                    </Col>
+                    <Col {...colProps}>
+                      <Form.Item name="ssh_pass" label="SSH 密码" extra={cfg.log_db?.ssh_pass ? '已保存密码，留空保持' : undefined}>
+                        <Input.Password placeholder={cfg.log_db?.ssh_pass ? '（已保存）' : ''} />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+
+                  <Space>
+                    <Button icon={<ApiOutlined />} onClick={test} loading={testing}>测试连接</Button>
+                  </Space>
+                </Form>
+              </Card>
+            ),
+          },
+          {
+            key: 'global',
+            label: '全局参数',
+            children: (
+              <Card size="small">
+                <Form form={formGlobal} layout="vertical">
+                  <Row gutter={[24, 0]}>
+                    <Col {...colProps}>
+                      <Form.Item name="log_enabled" label="启用日志持久化" valuePropName="checked">
+                        <Switch />
+                      </Form.Item>
+                    </Col>
+                    <Col {...colProps}>
+                      <Form.Item name="log_retention_days" label="日志保留天数">
+                        <InputNumber min={1} max={3650} style={{ width: '100%' }} />
+                      </Form.Item>
+                    </Col>
+                    <Col {...colProps}>
+                      <Form.Item name="collect_workers" label="并发采集线程数">
+                        <InputNumber min={1} max={32} style={{ width: '100%' }} />
+                      </Form.Item>
+                    </Col>
+                    <Col {...colProps}>
+                      <Form.Item name="auto_collect_interval" label="采集间隔(秒)" extra="保存后立即生效">
+                        <InputNumber min={5} max={86400} style={{ width: '100%' }} />
+                      </Form.Item>
+                    </Col>
+                    <Col {...colProps}>
+                      <Form.Item name="port" label="服务监听端口" extra="重启后生效">
+                        <InputNumber min={1} max={65535} style={{ width: '100%' }} />
+                      </Form.Item>
+                    </Col>
+                    <Col {...colProps}>
+                      <Form.Item name="trend_retention_days" label="趋势保留天数">
+                        <InputNumber min={1} max={365} style={{ width: '100%' }} />
+                      </Form.Item>
+                    </Col>
+                    <Col {...colProps}>
+                      <Form.Item name="ssh_connect_timeout" label="SSH 连接超时(秒)">
+                        <InputNumber min={3} max={120} style={{ width: '100%' }} />
+                      </Form.Item>
+                    </Col>
+                    <Col {...colProps}>
+                      <Form.Item name="ssh_exec_timeout" label="SQL 命令超时(秒)">
+                        <InputNumber min={10} max={600} style={{ width: '100%' }} />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                </Form>
+              </Card>
+            ),
+          },
+          {
+            key: 'notify',
+            label: '告警通知',
+            children: (
+              <Card size="small" title={<span><BellOutlined /> 告警通知</span>}>
+                <Alert
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: 16 }}
+                  message="采集后自动评估：健康分低于阈值或存在采集错误时，通过 Webhook / 邮件推送告警。同一服务器默认 5 分钟内不重复发送（去抖）。"
+                />
+                <Form form={formNotify} layout="vertical">
+                  <Divider orientation="left">Webhook</Divider>
+                  <Row gutter={[24, 0]}>
+                    <Col {...colProps}>
+                      <Form.Item name="webhook_url" label="Webhook URL">
+                        <Input placeholder="https://example.com/hook" />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                  <Divider orientation="left">邮件（SMTP）</Divider>
+                  <Row gutter={[24, 0]}>
+                    <Col {...colProps}>
+                      <Form.Item name="email_to" label="收件人（逗号分隔）">
+                        <Input placeholder="ops@example.com" />
+                      </Form.Item>
+                    </Col>
+                    <Col {...colProps}>
+                      <Form.Item name="email_from" label="发件人">
+                        <Input placeholder="oscar-monitor@example.com" />
+                      </Form.Item>
+                    </Col>
+                    <Col {...colProps}>
+                      <Form.Item name="email_smtp_host" label="SMTP 服务器">
+                        <Input placeholder="smtp.example.com" />
+                      </Form.Item>
+                    </Col>
+                    <Col {...colProps}>
+                      <Form.Item name="email_smtp_port" label="SMTP 端口">
+                        <InputNumber min={1} max={65535} style={{ width: '100%' }} />
+                      </Form.Item>
+                    </Col>
+                    <Col {...colProps}>
+                      <Form.Item name="email_smtp_user" label="SMTP 用户">
+                        <Input />
+                      </Form.Item>
+                    </Col>
+                    <Col {...colProps}>
+                      <Form.Item name="email_smtp_pass" label="SMTP 密码" extra={cfg.notify?.email_smtp_pass ? '已保存密码，留空保持' : undefined}>
+                        <Input.Password placeholder={cfg.notify?.email_smtp_pass ? '（已保存）' : ''} />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                  <Divider orientation="left">触发规则</Divider>
+                  <Row gutter={[24, 0]}>
+                    <Col {...colProps}>
+                      <Form.Item name="notify_enabled" label="启用告警通知" valuePropName="checked">
+                        <Switch />
+                      </Form.Item>
+                    </Col>
+                    <Col {...colProps}>
+                      <Form.Item name="notify_on_health_below" label="健康分阈值(低于触发)">
+                        <InputNumber min={0} max={100} style={{ width: '100%' }} />
+                      </Form.Item>
+                    </Col>
+                    <Col {...colProps}>
+                      <Form.Item name="notify_min_interval" label="去抖间隔(秒)">
+                        <InputNumber min={60} max={86400} style={{ width: '100%' }} />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                  <Space>
+                    <Button icon={<SendOutlined />} onClick={testNotify} loading={testingNotify}>保存并发送测试通知</Button>
+                  </Space>
+                </Form>
+              </Card>
+            ),
+          },
+        ]}
       />
 
-      <Card title="日志持久化数据库" size="small">
-        <Form form={formDb} layout="vertical" initialValues={{ db_type: 'oscar', port: 2003, user: 'SYSDBA', dbname: 'OSRDB', isql: 'isql', ssh_port: 22, ssh_user: 'root' }}>
-          <Divider orientation="left">数据库连接</Divider>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>
-            <Form.Item name="db_type" label="数据库类型">
-              <Select
-                options={[{ value: 'oscar', label: 'Oscar (神通)' }, { value: 'mysql', label: 'MySQL' }, { value: 'postgresql', label: 'PostgreSQL' }, { value: 'oracle', label: 'Oracle' }]}
-                onChange={onDbTypeChange}
-              />
-            </Form.Item>
-            <Form.Item name="host" label="主机">
-              <Input placeholder="127.0.0.1" />
-            </Form.Item>
-            <Form.Item name="port" label="端口">
-              <InputNumber min={1} max={65535} style={{ width: '100%' }} />
-            </Form.Item>
-            <Form.Item name="user" label="用户">
-              <Input />
-            </Form.Item>
-            <Form.Item name="pass" label="密码" extra={cfg.log_db?.pass ? '已保存密码，留空保持' : undefined}>
-              <Input.Password placeholder={cfg.log_db?.pass ? '（已保存）' : ''} />
-            </Form.Item>
-            <Form.Item name="dbname" label="数据库名">
-              <Input />
-            </Form.Item>
-            <Form.Item name="isql" label="CLI 命令">
-              <Input placeholder="isql" />
-            </Form.Item>
-          </div>
-
-          <Divider orientation="left">SSH 隧道（可选）</Divider>
-          <Alert
-            type="info"
-            showIcon
-            style={{ marginBottom: 16 }}
-            message="什么情况下需要填 SSH？"
-            description={
-              <>
-                当日志库在<strong>远程服务器</strong>、且监控机无法直接连接数据库（本机未安装 CLI 工具或数据库端口不对外开放）时，填写下方 SSH 主机与账号。
-                采集端会先 SSH 登录<strong>日志库所在服务器</strong>，再在其本机执行 CLI 读写日志表；留空则在本机直接连接。
-                填了 SSH 后，上方「数据库连接」的 host 应填日志库所在服务器的<strong>本地地址</strong>（如 127.0.0.1）。
-              </>
-            }
-          />
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>
-            <Form.Item name="ssh_host" label="SSH 主机">
-              <Input placeholder="留空表示本机直接连接" />
-            </Form.Item>
-            <Form.Item name="ssh_port" label="SSH 端口">
-              <InputNumber min={1} max={65535} style={{ width: '100%' }} />
-            </Form.Item>
-            <Form.Item name="ssh_user" label="SSH 用户">
-              <Input />
-            </Form.Item>
-            <Form.Item name="ssh_pass" label="SSH 密码" extra={cfg.log_db?.ssh_pass ? '已保存密码' : undefined}>
-              <Input.Password placeholder={cfg.log_db?.ssh_pass ? '（已保存）' : ''} />
-            </Form.Item>
-          </div>
-
-          <Space>
-            <Button icon={<ApiOutlined />} onClick={test} loading={testing}>测试连接</Button>
-          </Space>
-        </Form>
-      </Card>
-
-      <Card title="全局参数" size="small">
-        <Form form={formGlobal} layout="vertical">
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16 }}>
-            <Form.Item name="log_enabled" label="启用日志持久化" valuePropName="checked">
-              <Switch />
-            </Form.Item>
-            <Form.Item name="log_retention_days" label="日志保留天数">
-              <InputNumber min={1} max={3650} style={{ width: '100%' }} />
-            </Form.Item>
-            <Form.Item name="collect_workers" label="并发采集线程数">
-              <InputNumber min={1} max={32} style={{ width: '100%' }} />
-            </Form.Item>
-            <Form.Item name="port" label="服务监听端口" extra="重启后生效">
-              <InputNumber min={1} max={65535} style={{ width: '100%' }} />
-            </Form.Item>
-            <Form.Item name="trend_retention_days" label="趋势保留天数">
-              <InputNumber min={1} max={365} style={{ width: '100%' }} />
-            </Form.Item>
-            <Form.Item name="ssh_connect_timeout" label="SSH 连接超时(秒)">
-              <InputNumber min={3} max={120} style={{ width: '100%' }} />
-            </Form.Item>
-            <Form.Item name="ssh_exec_timeout" label="SQL 命令超时(秒)">
-              <InputNumber min={10} max={600} style={{ width: '100%' }} />
-            </Form.Item>
-          </div>
-        </Form>
-      </Card>
-
-      <Card title={<span><BellOutlined /> 告警通知</span>} size="small">
-        <Alert
-          type="info"
-          showIcon
-          style={{ marginBottom: 16 }}
-          message="采集后自动评估：健康分低于阈值或存在采集错误时，通过 Webhook / 邮件推送告警。同一服务器默认 5 分钟内不重复发送（去抖）。"
-        />
-        <Form form={formNotify} layout="vertical">
-          <Divider orientation="left">Webhook</Divider>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
-            <Form.Item name="webhook_url" label="Webhook URL">
-              <Input placeholder="https://example.com/hook" />
-            </Form.Item>
-          </div>
-          <Divider orientation="left">邮件（SMTP）</Divider>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>
-            <Form.Item name="email_to" label="收件人（逗号分隔）">
-              <Input placeholder="ops@example.com" />
-            </Form.Item>
-            <Form.Item name="email_from" label="发件人">
-              <Input placeholder="oscar-monitor@example.com" />
-            </Form.Item>
-            <Form.Item name="email_smtp_host" label="SMTP 服务器">
-              <Input placeholder="smtp.example.com" />
-            </Form.Item>
-            <Form.Item name="email_smtp_port" label="SMTP 端口">
-              <InputNumber min={1} max={65535} style={{ width: '100%' }} />
-            </Form.Item>
-            <Form.Item name="email_smtp_user" label="SMTP 用户">
-              <Input />
-            </Form.Item>
-            <Form.Item name="email_smtp_pass" label="SMTP 密码" extra={cfg.notify?.email_smtp_pass ? '已保存密码，留空保持' : undefined}>
-              <Input.Password placeholder={cfg.notify?.email_smtp_pass ? '（已保存）' : ''} />
-            </Form.Item>
-          </div>
-          <Divider orientation="left">触发规则</Divider>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>
-            <Form.Item name="notify_enabled" label="启用告警通知" valuePropName="checked">
-              <Switch />
-            </Form.Item>
-            <Form.Item name="notify_on_health_below" label="健康分阈值(低于触发)">
-              <InputNumber min={0} max={100} style={{ width: '100%' }} />
-            </Form.Item>
-            <Form.Item name="notify_min_interval" label="去抖间隔(秒)">
-              <InputNumber min={60} max={86400} style={{ width: '100%' }} />
-            </Form.Item>
-          </div>
-          <Space>
-            <Button icon={<SendOutlined />} onClick={testNotify} loading={testingNotify}>保存并发送测试通知</Button>
-          </Space>
-        </Form>
-      </Card>
-
-      <div>
+      {/* 底部固定操作栏：生效配置摘要 + 保存按钮 */}
+      <div
+        style={{
+          position: 'sticky',
+          bottom: 16,
+          background: '#fff',
+          border: '1px solid #f0f0f0',
+          borderRadius: 10,
+          padding: '10px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 12,
+          boxShadow: '0 -2px 10px rgba(0,0,0,0.04)',
+        }}
+      >
+        <Space size={[6, 6]} wrap>
+          {summaryTags.map((t) => (
+            <Tag key={t.label} color={t.blue ? 'blue' : 'default'} style={{ marginInlineEnd: 0 }}>
+              {t.label} {t.value}
+            </Tag>
+          ))}
+        </Space>
         <Button type="primary" icon={<SaveOutlined />} onClick={save} loading={saving}>
           保存全部配置
         </Button>
       </div>
-
-      <Descriptions title="当前生效配置" column={2} size="small" bordered>
-        <Descriptions.Item label="日志持久化">
-          <Tag color={cfg.log_enabled ? 'green' : 'default'}>{cfg.log_enabled ? '已启用' : '未启用'}</Tag>
-        </Descriptions.Item>
-        <Descriptions.Item label="并发采集线程">{cfg.collect_workers ?? '-'}</Descriptions.Item>
-        <Descriptions.Item label="服务端口">{cfg.port ?? 5080}</Descriptions.Item>
-        <Descriptions.Item label="日志保留天数">{cfg.log_retention_days ?? '-'}</Descriptions.Item>
-        <Descriptions.Item label="趋势保留天数">{cfg.trend_retention_days ?? '-'}</Descriptions.Item>
-        <Descriptions.Item label="SSH 连接超时">{cfg.ssh_connect_timeout ? `${cfg.ssh_connect_timeout}s` : '-'}</Descriptions.Item>
-        <Descriptions.Item label="SQL 命令超时">{cfg.ssh_exec_timeout ? `${cfg.ssh_exec_timeout}s` : '-'}</Descriptions.Item>
-        <Descriptions.Item label="告警通知">
-          <Tag color={cfg.notify?.enabled ? 'green' : 'default'}>{cfg.notify?.enabled ? '已启用' : '未启用'}</Tag>
-        </Descriptions.Item>
-        <Descriptions.Item label="存储后端">{cfg.storage_backend ?? 'json'}</Descriptions.Item>
-      </Descriptions>
     </div>
   )
 }

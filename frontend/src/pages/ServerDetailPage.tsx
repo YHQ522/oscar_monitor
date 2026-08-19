@@ -16,6 +16,8 @@ import StoragePie from '../components/StoragePie'
 import DiskUsage from '../components/DiskUsage'
 import CpuPanel from '../components/CpuPanel'
 import OsErrorsPanel from '../components/OsErrorsPanel'
+import DbLogErrorsPanel from '../components/DbLogErrorsPanel'
+import DbMemoryPanel from '../components/DbMemoryPanel'
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts'
 import type { CollectData, HealthScore, Server, TrendPoint, QuerySetMeta } from '../api/types'
 
@@ -59,6 +61,8 @@ export default function ServerDetailPage() {
   const [health, setHealth] = useState<HealthScore | null>(null)
   const [trends, setTrends] = useState<TrendPoint[]>([])
   const [querySets, setQuerySets] = useState<Record<string, QuerySetMeta>>({})
+  const [queryLabels, setQueryLabels] = useState<Record<string, string>>({})
+  const [columnLabels, setColumnLabels] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [collecting, setCollecting] = useState(false)
 
@@ -66,7 +70,7 @@ export default function ServerDetailPage() {
     try {
       const [s, meta] = await Promise.all([
         api.get<Server[]>('/api/servers').then((list) => list.find((x) => x.id === id)),
-        api.get<{ query_sets: Record<string, Record<string, QuerySetMeta>> }>('/api/meta'),
+        api.get<{ query_sets: Record<string, Record<string, QuerySetMeta>>; query_labels: Record<string, string>; column_labels: Record<string, string> }>('/api/meta'),
       ])
       if (!s) {
         message.error('服务器不存在')
@@ -75,6 +79,8 @@ export default function ServerDetailPage() {
       }
       setServer(s)
       setQuerySets(meta.query_sets[s.db_type] || {})
+      setQueryLabels(meta.query_labels || {})
+      setColumnLabels(meta.column_labels || {})
       const [cached, h] = await Promise.all([
         fetchServerData(id),
         api.get<HealthScore>(`/api/servers/${id}/health`).catch(() => null),
@@ -137,9 +143,13 @@ export default function ServerDetailPage() {
       if (key === 'os_errors') {
         return { key, label, children: <OsErrorsPanel result={result} /> }
       }
-      return { key, label, children: <QueryTable result={result} title={label} /> }
+      // 数据库错误日志文件：级别筛选面板（默认只显示 ERROR/FATAL/WARNING，最新在前）
+      if (key === 'db_log_errors') {
+        return { key, label, children: <DbLogErrorsPanel result={result} /> }
+      }
+      return { key, label, children: <QueryTable result={result} title={label} columnLabels={columnLabels} /> }
     })
-  }, [data])
+  }, [data, columnLabels])
 
   const dbTabs = useMemo(() => {
     if (!data?.db_queries) return []
@@ -148,17 +158,23 @@ export default function ServerDetailPage() {
       label: querySets[cat]?.label || cat,
       children: (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          {Object.entries(queries).map(([qname, result]) => (
-            <QueryTable
-              key={qname}
-              result={result}
-              title={`${querySets[cat]?.queries?.[qname] ? '' : ''}${qname}`}
-            />
-          ))}
+          {Object.entries(queries).map(([qname, result]) => {
+            if (qname === 'db_memory') {
+              return <DbMemoryPanel key={qname} result={result} title={queryLabels[qname] || '数据库内存'} />
+            }
+            return (
+              <QueryTable
+                key={qname}
+                result={result}
+                title={queryLabels[qname] || qname}
+                columnLabels={columnLabels}
+              />
+            )
+          })}
         </div>
       ),
     }))
-  }, [data, querySets])
+  }, [data, querySets, queryLabels, columnLabels])
 
   if (loading) {
     return (

@@ -43,6 +43,8 @@ export interface Server {
   enabled_os_checks: string[]
   skip_db?: boolean
   apps: AppConfig[]
+  elog_path?: string
+  elog_hours?: number
   has_ssh_pass: boolean
   has_db_pass: boolean
   created_at?: string
@@ -69,6 +71,8 @@ export interface HealthDetail {
   value: string
   score: number
   status?: 'healthy' | 'warning' | 'danger'
+  label?: string
+  detail?: string
 }
 
 export interface HealthScore {
@@ -146,6 +150,7 @@ export interface SysConfig {
   server_db_enabled?: boolean
   log_retention_days?: number
   collect_workers?: number
+  auto_collect_interval?: number
   port?: number
   export_schedule?: Record<string, unknown>
   storage_backend?: string

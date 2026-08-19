@@ -166,6 +166,7 @@ def get_settings() -> Settings:
         "server_db_enabled",
         "log_retention_days",
         "collect_workers",
+        "auto_collect_interval",
         "trend_retention_days",
         "ssh_connect_timeout",
         "ssh_exec_timeout",

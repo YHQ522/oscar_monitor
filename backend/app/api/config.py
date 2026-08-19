@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 
 from ..config import Settings
 from ..core.constants import DB_ERROR_TRANSLATE, SSH_ERROR_TRANSLATE, SSH_FIX_LINUX, SSH_FIX_WIN
-from ..core.db_exec import exec_sql
+from ..core.db_exec import exec_sql, output_has_error
 from ..core.ssh import translate_error
 from ..services.scheduler import CollectScheduler
 from ..services.auth_service import UserService
@@ -41,7 +41,19 @@ def test_notify(settings: Settings = Depends(get_settings_dep)):
 
 
 @router.post("/config/test-log-db", dependencies=[Depends(require_permission("admin"))])
-def test_log_db(data: dict):
+def test_log_db(
+    data: dict,
+    settings: Settings = Depends(get_settings_dep),
+):
+    """测试日志库连接。密码留空时回退使用已保存配置（与更新逻辑一致）。
+
+    注意：必须从 Settings 取原始密码（config_service.get() 返回的是脱敏布尔值）。
+    """
+    saved_db = settings.log_db or {}
+    # 前端密码框留空表示"使用已保存密码"，测试时用已保存密码补齐
+    for key in ("pass", "ssh_pass"):
+        if not data.get(key):
+            data[key] = saved_db.get(key, "")
     result: dict = {"ssh": None, "db": None}
     ssh_host = data.get("ssh_host", "")
 
@@ -79,8 +91,10 @@ def test_log_db(data: dict):
     }
     try:
         out, err, ec = exec_sql(server_cfg, "select 1;", timeout=15)
-        if ec != 0 and not out.strip():
-            raise RuntimeError(err or "执行失败")
+        # 退出码非 0 或输出含数据库错误特征，一律视为失败
+        # （部分 CLI 登录失败/语法错误时退出码仍为 0，错误只写在 stdout）
+        if ec != 0 or output_has_error(out):
+            raise RuntimeError((err or out or "执行失败").strip()[:300])
         result["db"] = {"ok": True, "msg": "数据库连接成功"}
     except Exception as e:  # noqa: BLE001
         result["db"] = {"ok": False, "msg": translate_error(str(e), DB_ERROR_TRANSLATE)}

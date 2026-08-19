@@ -27,12 +27,19 @@ _EMAIL_TIMEOUT = 15
 
 
 def collect_errors(result: dict[str, Any]) -> list[str]:
-    """从采集结果中提取错误信息列表（OS 检查 + 数据库查询）。"""
+    """从采集结果中提取错误信息列表（OS 检查 + 数据库查询 + elog 严重错误）。"""
     errors: list[str] = []
     os_info = result.get("os_info", {}) or {}
     for key, val in os_info.items():
         if isinstance(val, dict) and val.get("error"):
             errors.append(f"{key}: {val['error']}")
+    # 数据库错误日志（elog）中的严重错误行（ERROR/FATAL/PANIC）计入告警
+    elog = os_info.get("db_log_errors", {}) or {}
+    for r in elog.get("rows") or []:
+        if len(r) >= 4 and str(r[2]).upper() in ("ERROR", "FATAL", "PANIC"):
+            errors.append(f"elog/{r[0]}: {r[1]} {r[3]}")
+            if len(errors) >= 10:
+                break
     db_queries = result.get("db_queries", {}) or {}
     for cat, queries in db_queries.items():
         for qname, qr in (queries or {}).items():

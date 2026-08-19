@@ -10,7 +10,7 @@ from typing import Any
 
 from ..adapters import get_adapter
 from ..config import Settings
-from ..core.db_exec import exec_sql, parse_isql_output
+from ..core.db_exec import exec_sql, output_has_error, parse_isql_output
 
 LOG_TABLE = "oscar_log_collect"
 
@@ -43,9 +43,20 @@ class LogPersistService:
         return str(self._log_cfg().get("db_type", "")).lower() in ("mysql", "mariadb")
 
     def _server_cfg(self) -> dict[str, Any]:
-        """把 log_db 配置转换为 server 形式，复用 core.db_exec.exec_sql。"""
+        """把 log_db 配置转换为 server 形式，复用 core.db_exec.exec_sql。
+
+        os_type 表示「日志库所在系统」：配置了 SSH 时远程执行（默认 Linux，
+        可用 log_db.os_type 覆盖）；无 SSH 时在本机执行，取监控机自身系统。
+        """
         db = self._log_cfg()
         adapter = get_adapter(db.get("db_type"))
+        ssh_host = db.get("ssh_host", "")
+        if db.get("os_type"):
+            os_type = str(db["os_type"])
+        elif ssh_host:
+            os_type = "linux"
+        else:
+            os_type = "windows" if platform.system() == "Windows" else "linux"
         return {
             "db_host": db.get("host", "127.0.0.1"),
             "db_port": db.get("port", adapter.default_port),
@@ -54,11 +65,11 @@ class LogPersistService:
             "db_name": db.get("dbname", adapter.default_db),
             "db_type": db.get("db_type", "oscar"),
             "isql_cmd": db.get("isql", "") or adapter.cli_tool,
-            "ssh_host": db.get("ssh_host", ""),
+            "ssh_host": ssh_host,
             "ssh_port": db.get("ssh_port", 22),
             "ssh_user": db.get("ssh_user", "root"),
             "ssh_pass": db.get("ssh_pass", ""),
-            "os_type": "windows" if platform.system() == "Windows" else "linux",
+            "os_type": os_type,
         }
 
     def _exec_sql(self, sql: str) -> None:
@@ -135,7 +146,7 @@ where not exists (
     select 1 from {LOG_TABLE}
     where server_name='{sname}' and error_msg='{msg}' and {concat('exec_sql','')}='{esql}'
 );
-update {LOG_TABLE} set occur_count=occur_count+1
+update {LOG_TABLE} set occur_count=occur_count+1, occur_time={cast_ts(otime)}
 where server_name='{sname}' and error_msg='{msg}' and {concat('exec_sql','')}='{esql}';
 """)
 
@@ -167,6 +178,7 @@ where server_name='{sname}' and check_type='slow_sql' and error_msg='{msg}';
         with self._lock:
             if not self._ensure_table():
                 return
+        adapter = get_adapter(self._log_cfg().get("db_type"))
         bs = self._is_mysql()
         safe_msg = safe_str(error_msg, 500, backslash=bs)
         safe_server = safe_str(server_name, backslash=bs)
@@ -209,7 +221,8 @@ where server_name='{safe_server}' and check_type='{safe_type}' and error_msg='{s
         )
         server = self._server_cfg()
         out, err, ec = exec_sql(server, sql, timeout=15)
-        if ec != 0 and not out.strip():
+        # 退出码非 0 或输出含错误特征均视为查询失败
+        if ec != 0 or output_has_error(out):
             return []
         parsed = parse_isql_output(out, "logs")
         columns = parsed.get("columns", [])

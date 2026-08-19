@@ -34,11 +34,23 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   const resp = await fetch(path, { ...options, headers })
   if (resp.status === 401) {
+    const isLoginPath = path.includes('/auth/login')
+    // 先尝试解析后端返回的具体错误信息（如「用户名或密码错误」）
+    const contentType = resp.headers.get('content-type') || ''
+    let detail = ''
+    if (contentType.includes('application/json')) {
+      try {
+        const data = await resp.json()
+        detail = (data as { detail?: string }).detail || ''
+      } catch {
+        /* 忽略解析失败 */
+      }
+    }
     clearToken()
-    if (!path.includes('/auth/login')) {
+    if (!isLoginPath) {
       window.location.href = '/login'
     }
-    throw new ApiError(401, '未登录或会话已过期')
+    throw new ApiError(401, detail || '未登录或会话已过期')
   }
 
   const contentType = resp.headers.get('content-type') || ''

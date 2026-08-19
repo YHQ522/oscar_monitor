@@ -12,7 +12,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from ..config import Settings
 from .cache import CacheStore, get_cache
 from .collector import collect_all
-from .health import calc_health_score
+from .health import calc_health_score, smooth_score
 from .notify import collect_errors, get_notifier
 from .persist import LogPersistService, get_log_service
 from .server_service import ServerService, get_server_service
@@ -61,13 +61,13 @@ class CollectScheduler:
             self._executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="collect")
         return self._executor
 
-    def _persist_executor(self) -> ThreadPoolExecutor:
+    def _get_persist_executor(self) -> ThreadPoolExecutor:
         if self._persist_executor is None:
             self._persist_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="persist")
         return self._persist_executor
 
     def reinit(self) -> None:
-        """配置变更后重建线程池。"""
+        """配置变更后重建线程池，并使采集间隔立即生效。"""
         with self._lock:
             if self._executor:
                 self._executor.shutdown(wait=False)
@@ -75,6 +75,17 @@ class CollectScheduler:
                 self._persist_executor.shutdown(wait=False)
             self._executor = None
             self._persist_executor = None
+            if self._scheduler:
+                job = self._scheduler.get_job("auto_collect")
+                if job:
+                    try:
+                        job.reschedule(
+                            trigger="interval",
+                            seconds=max(1, int(self.settings.auto_collect_interval)),
+                        )
+                        logger.info("采集间隔已更新为 %s 秒", self.settings.auto_collect_interval)
+                    except Exception:  # noqa: BLE001
+                        logger.exception("采集间隔更新失败")
 
     # ── 采集 ──
     def collect_one(self, server: dict[str, Any]) -> dict[str, Any]:
@@ -167,7 +178,7 @@ class CollectScheduler:
     def _persist_errors(self, server: dict[str, Any], result: dict[str, Any]) -> None:
         if not server.get("persist_enabled"):
             return
-        self._persist_executor().submit(self._do_persist, server, result)
+        self._get_persist_executor().submit(self._do_persist, server, result)
 
     def _do_persist(self, server: dict[str, Any], result: dict[str, Any]) -> None:
         server_name = server.get("name") or server.get("ssh_host", "")
@@ -196,6 +207,16 @@ class CollectScheduler:
                     sql = str(row[1] or "")[:800]
                     if cost >= 0.5 and sql:
                         self.log_service.persist_slow_sql(server_name, {"cost": cost, "sql": sql})
+
+        # 死锁数 > 0 时持久化为 deadlock 类型日志（与首页死锁详情弹窗一致）
+        dl = perf.get("deadlock_count", {})
+        if dl and not dl.get("error") and dl.get("rows"):
+            try:
+                n = int(dl["rows"][0][0])
+                if n > 0:
+                    self.log_service.persist_os_error(server_name, "deadlock", f"死锁数: {n}")
+            except (ValueError, IndexError, TypeError):
+                pass
 
     def _parse_elog_content(self, server_name: str, text: str) -> None:
         blocks = text.split("===FILE:")

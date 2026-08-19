@@ -44,6 +44,9 @@ class ServerBase(BaseModel):
     enabled_os_checks: Optional[list[str]] = None
     skip_db: bool = False  # 仅系统监控：跳过数据库采集/连接测试
     apps: list[AppConfig] = Field(default_factory=list)
+    # 数据库错误日志（elog）采集：路径（目录/通配/逗号分隔，留空全盘搜索）+ 时间窗（小时）
+    elog_path: str = ""
+    elog_hours: int = 24
 
 
 class ServerCreate(ServerBase):
@@ -75,6 +78,8 @@ class ServerUpdate(BaseModel):
     enabled_os_checks: Optional[list[str]] = None
     skip_db: Optional[bool] = None
     apps: Optional[list[AppConfig]] = None
+    elog_path: Optional[str] = None
+    elog_hours: Optional[int] = None
 
 
 class ServerOut(BaseModel):
@@ -103,6 +108,8 @@ class ServerOut(BaseModel):
     enabled_os_checks: list[str] = Field(default_factory=list)
     skip_db: bool = False
     apps: list[dict[str, Any]] = Field(default_factory=list)
+    elog_path: str = ""
+    elog_hours: int = 24
     has_ssh_pass: bool = False
     has_db_pass: bool = False
     created_at: Optional[str] = None

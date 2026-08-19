@@ -2,6 +2,9 @@
 Description=oscar-monitor 数据库监控管控平台
 Documentation=https://github.com/your-org/oscar_monitor
 After=network.target
+# 等待数据库服务先启动（监控程序与数据库同机部署时建议启用）。
+# 服务名请按实际实例修改（如 oscardb_OSRDBd.service）；若该服务不存在，systemd 会自动忽略，不影响本服务启动。
+After=oscardb_OSRDBd.service oscaragentd.service
 
 [Service]
 Type=simple

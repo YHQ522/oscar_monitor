@@ -75,7 +75,7 @@ def parse_mem_pct(mem_raw: str) -> float | None:
         total_k, avail_k = int(mt.group(1)), int(ma.group(1))
         if total_k > 0:
             return round((total_k - avail_k) / total_k * 100, 1)
-    fm = re.search(r"Mem:\s+([\d.]+)([GMK])\s+([\d.]+)([GMK])", mem_raw)
+    fm = re.search(r"Mem:\s+([\d.]+)([GMK])i?\s+([\d.]+)([GMK])i?", mem_raw)
     if fm:
         total = float(fm.group(1))
         used = float(fm.group(3))
@@ -93,6 +93,59 @@ def parse_session_count(data: dict[str, Any]) -> int | None:
         except (ValueError, IndexError, TypeError):
             return None
     return None
+
+
+def parse_disk_pct(disk_raw: str) -> float | None:
+    """从磁盘检查输出提取最高占用盘使用率，兼容 Windows 与 Linux 格式。
+
+    Windows: C 30.2GB/62.9GB
+             D 7.7GB/7.7GB
+    Linux df -h: Filesystem Size Used Avail Use% Mounted on
+                  /dev/sda1  40G  15G  23G  40% /
+    """
+    top = parse_disk_top(disk_raw)
+    return top[0] if top else None
+
+
+def parse_disk_top(disk_raw: str) -> tuple[float, str, str] | None:
+    """磁盘解析（多盘感知）：返回 (最高使用率, 最高盘标识, 全部盘明细串)。
+
+    - Windows 盘标识为盘符（如 E），明细为 "C 48.0%, D 92.0%"
+    - Linux 盘标识为挂载点（如 /），明细为 "/ 73.0%, /boot 40.0%"
+    排除光驱(/dev/sr*)与 tmpfs 等伪文件系统；无有效数据返回 None。
+    """
+    if not disk_raw:
+        return None
+    win_re = re.compile(r"^([A-Za-z])\s+([\d.]+)GB/([\d.]+)GB$")
+    lines = [ln.strip() for ln in disk_raw.strip().splitlines() if ln.strip()]
+    rows: list[tuple[str, float]] = []
+    if lines and all(win_re.match(ln) for ln in lines):
+        for ln in lines:
+            m = win_re.match(ln)
+            used, total = float(m.group(2)), float(m.group(3))
+            if total > 0:
+                rows.append((m.group(1), round(used / total * 100, 1)))
+    else:
+        # Linux df -h：只统计 /dev/ 开头的真实块设备，排除光驱(/dev/sr*)、tmpfs 等
+        for ln in lines:
+            parts = ln.split()
+            if len(parts) < 6:
+                continue
+            fs, use, mount = parts[0], parts[4], parts[5]
+            if not fs.startswith("/dev/") or "/sr" in fs:
+                continue
+            m = re.match(r"(\d+(?:\.\d+)?)%$", use)
+            if m:
+                rows.append((mount, float(m.group(1))))
+        if not rows:
+            # 回退：所有行中的百分比（Use% 列后跟挂载点）
+            for m in re.finditer(r"(\d+(?:\.\d+)?)%\s+(\S+)\s*$", disk_raw, re.M):
+                rows.append((m.group(2), float(m.group(1))))
+    if not rows:
+        return None
+    label, pct = max(rows, key=lambda r: r[1])
+    detail = ", ".join(f"{lbl} {p}%" for lbl, p in rows)
+    return pct, label, detail
 
 
 def parse_slow_sql_count(data: dict[str, Any]) -> int | None:
@@ -179,6 +232,19 @@ def calc_health_score(
             details["memory"] = {"value": f"{mem_pct}%", "score": round(mem_score), "status": _status(mem_pct, 80, 90)}
             weighted_score += mem_score * 25
             total_weight += 25
+
+    # Disk — 需勾选系统采集项 disk；仅做状态展示（首页资源徽章），不参与评分
+    if os_on("disk"):
+        disk_top = parse_disk_top(data.get("os_info", {}).get("disk", {}).get("output", "") or "")
+        if disk_top is not None:
+            disk_pct, disk_label, disk_detail = disk_top
+            details["disk"] = {
+                "value": f"{disk_pct}%",
+                "score": 100,
+                "status": _status(disk_pct, 80, 90),
+                "label": disk_label,
+                "detail": disk_detail,
+            }
 
     # Sessions (20) — 需勾选数据库类别 performance
     if perf_on():

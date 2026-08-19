@@ -2,13 +2,14 @@
 import { useEffect, useState } from 'react'
 import { Card, Table, Tag, Input, Select, Space, Button, Pagination, Empty } from 'antd'
 import { App as AntApp } from 'antd'
-import { SearchOutlined } from '@ant-design/icons'
-import { useParams } from 'react-router-dom'
+import { SearchOutlined, ArrowLeftOutlined } from '@ant-design/icons'
+import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import type { Server, LogRecord } from '../api/types'
 
 export default function LogHistoryPage() {
   const { id = '' } = useParams()
+  const navigate = useNavigate()
   const { message } = AntApp.useApp()
   const [server, setServer] = useState<Server | null>(null)
   const [logs, setLogs] = useState<LogRecord[]>([])
@@ -65,7 +66,10 @@ export default function LogHistoryPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <h2 style={{ margin: 0 }}>日志历史 {server ? `— ${server.name}` : ''}</h2>
+      <Space>
+        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(`/server/${id}`)}>返回</Button>
+        <h2 style={{ margin: 0 }}>日志历史 {server ? `— ${server.name}` : ''}</h2>
+      </Space>
 
       <Card size="small">
         <Space wrap>

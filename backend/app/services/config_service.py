@@ -42,6 +42,7 @@ class ConfigService:
             "server_db_enabled": cfg.get("server_db_enabled", self.settings.server_db_enabled),
             "log_retention_days": cfg.get("log_retention_days", self.settings.log_retention_days),
             "collect_workers": cfg.get("collect_workers", self.settings.collect_workers),
+            "auto_collect_interval": cfg.get("auto_collect_interval", self.settings.auto_collect_interval),
             "port": cfg.get("port", self.settings.port),
             "export_schedule": cfg.get("export_schedule", self.settings.export_schedule),
             "storage_backend": self.settings.storage_backend,
@@ -85,7 +86,7 @@ class ConfigService:
                 pass  # 保持默认关闭
         for key in (
             "log_enabled", "server_db_enabled", "log_retention_days", "collect_workers",
-            "export_schedule", "trend_retention_days", "ssh_connect_timeout", "ssh_exec_timeout",
+            "auto_collect_interval", "export_schedule", "trend_retention_days", "ssh_connect_timeout", "ssh_exec_timeout",
             "port",
         ):
             if key in data:
@@ -106,6 +107,7 @@ class ConfigService:
         s.server_db_enabled = bool(cfg.get("server_db_enabled", s.server_db_enabled))
         s.log_retention_days = int(cfg.get("log_retention_days", s.log_retention_days))
         s.collect_workers = int(cfg.get("collect_workers", s.collect_workers))
+        s.auto_collect_interval = int(cfg.get("auto_collect_interval", s.auto_collect_interval))
         s.port = int(cfg.get("port", s.port))
         s.trend_retention_days = int(cfg.get("trend_retention_days", s.trend_retention_days))
         s.ssh_connect_timeout = float(cfg.get("ssh_connect_timeout", s.ssh_connect_timeout))

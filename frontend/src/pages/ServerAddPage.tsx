@@ -24,7 +24,7 @@ const DB_RELATED_OS_CHECKS = ['install_path', 'db_log_errors']
 // 数据库类型属于「数据库连接」步骤（第 3 步），与连接参数联动；仅系统模式下该步骤整体跳过
 const STEP_FIELDS: string[][] = [
   ['name', 'os_type', 'ssh_host', 'ssh_port', 'ssh_user', 'ssh_pass', 'auto_refresh'],
-  ['enabled_categories', 'enabled_os_checks'],
+  ['enabled_categories', 'enabled_os_checks', 'elog_path', 'elog_hours'],
   ['db_type', 'db_host', 'db_port', 'db_user', 'db_pass', 'db_name', 'isql_cmd'],
   ['in_control', 'svc_name', 'svc_mgr', 'svc_start_cmd', 'svc_stop_cmd', 'persist_enabled'],
   [],
@@ -469,6 +469,20 @@ export default function ServerAddPage() {
                   </Form.Item>
                 </Col>
               </Row>
+              {wOsChecks?.includes('db_log_errors') && (
+                <Row gutter={[16, 8]} style={{ marginTop: 4 }}>
+                  <Col xs={24} md={16}>
+                    <Form.Item name="elog_path" label="错误日志路径" extra="数据库 elog 日志目录或通配路径，多个用英文逗号分隔；留空自动全盘搜索（结果缓存 24 小时）">
+                      <Input placeholder="如 /opt/ShenTong/log 或 /opt/ShenTong/log/elog*" />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} md={8}>
+                    <Form.Item name="elog_hours" label="时间窗(小时)" extra="只展示最近 N 小时内的错误日志" initialValue={24}>
+                      <InputNumber min={1} max={24 * 30} style={{ width: '100%' }} />
+                    </Form.Item>
+                  </Col>
+                </Row>
+              )}
             </>
           </div>
 
@@ -547,13 +561,20 @@ export default function ServerAddPage() {
                   </Form.Item>
                 </Col>
                 <Col xs={24} sm={12} md={8}>
-                  <Form.Item name="svc_name" label="服务名" extra="数据库服务名称（如 oscardb_OSRDBd）" rules={[requireIf(!!wInControl)]} required={!!wInControl}>
-                    <Input placeholder="oscardb_OSRDBd" />
+                  <Form.Item
+                    name="svc_name"
+                    label="服务名"
+                    extra={wOsType === 'windows'
+                      ? 'Windows 服务名，支持 {db_name} 变量（如 OSCARDB_{db_name}_SERVER）；留空按 OSCARDB_<库名>_SERVER 自动推导'
+                      : '支持 {db_name}/{db_host} 等变量（如 oscardb_{db_name}d）；留空按数据库类型自动推导（oscar→oscardb_库名d，mysql→mysqld，postgresql→postgresql，oracle→oracle）'}
+                  >
+                    <Input placeholder={wOsType === 'windows' ? '留空自动推导，如 OSCARDB_OSRDB_SERVER' : '留空自动推导，如 oscardb_OSRDBd'} />
                   </Form.Item>
                 </Col>
                 <Col xs={24} sm={12} md={8}>
-                  <Form.Item name="svc_mgr" label="服务管理器" extra={svcMgrHelp}>
+                  <Form.Item name="svc_mgr" label="服务管理器" extra={wOsType === 'windows' ? 'Windows 目标机通过 sc 命令管理服务，无需选择（仅 Linux 生效）' : svcMgrHelp}>
                     <Select
+                      disabled={wOsType === 'windows'}
                       options={[
                         { value: 'systemctl', label: 'systemctl（systemd）' },
                         { value: 'service', label: 'service（SysVinit）' },

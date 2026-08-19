@@ -14,7 +14,7 @@ from .deps import any_permission, get_export_service_dep, get_settings_dep, requ
 router = APIRouter(prefix="/api", tags=["reports"])
 
 
-@router.get("/export/history", dependencies=[Depends(require_permission("admin"))])
+@router.get("/export/history", dependencies=[Depends(any_permission("admin", "reports_view"))])
 def export_history(export_service: ExportService = Depends(get_export_service_dep)):
     return export_service.history()
 
@@ -25,7 +25,7 @@ def delete_history(filename: str, export_service: ExportService = Depends(get_ex
     return {"status": "ok"}
 
 
-@router.get("/export/download/{filename}", dependencies=[Depends(require_permission("admin"))])
+@router.get("/export/download/{filename}", dependencies=[Depends(any_permission("admin", "reports_view"))])
 def download_history(filename: str, settings: Settings = Depends(get_settings_dep)):
     """下载历史导出文件（防路径穿越）。"""
     import os
@@ -37,7 +37,7 @@ def download_history(filename: str, settings: Settings = Depends(get_settings_de
     return FileResponse(target, filename=target.name)
 
 
-@router.post("/export/xlsx", dependencies=[Depends(require_permission("admin"))])
+@router.post("/export/xlsx", dependencies=[Depends(any_permission("admin", "reports_view"))])
 def export_xlsx(
     data: dict,
     export_service: ExportService = Depends(get_export_service_dep),

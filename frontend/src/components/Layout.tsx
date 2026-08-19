@@ -1,7 +1,7 @@
 // 主布局：侧边导航 + 顶栏
 import { useEffect, useMemo, useState } from 'react'
-import type { ReactNode } from 'react'
 import { Layout as AntLayout, Menu, Avatar, Dropdown, theme, Button, Badge, Modal, Tag, Empty, Space } from 'antd'
+import type { MenuProps } from 'antd'
 import {
   DashboardOutlined,
   DatabaseOutlined,
@@ -100,21 +100,56 @@ export default function Layout() {
   const unreadCount = unreadAlerts.length
 
   const menuItems = useMemo(() => {
-    const items: { key: string; icon: ReactNode; label: string }[] = []
-    if (user?.is_admin || user?.perms.includes('dashboard')) {
-      items.push({ key: '/', icon: <DashboardOutlined />, label: '全局监控' })
+    const items: MenuProps['items'] = []
+    const has = (...perms: string[]) =>
+      !!user?.is_admin || perms.some((p) => user?.perms.includes(p))
+
+    // 监控：全局监控
+    if (has('dashboard')) {
+      items.push({
+        type: 'group',
+        label: '监控',
+        children: [{ key: '/', icon: <DashboardOutlined />, label: '全局监控' }],
+      })
     }
-    if (user?.is_admin || user?.perms.some((p) => ['servers_view', 'servers_edit'].includes(p))) {
-      items.push({ key: '/servers', icon: <DatabaseOutlined />, label: '服务管理' })
+    // 管理：服务管理
+    if (has('servers_view', 'servers_edit')) {
+      items.push({
+        type: 'group',
+        label: '管理',
+        children: [{ key: '/servers', icon: <DatabaseOutlined />, label: '服务管理' }],
+      })
     }
-    if (user?.is_admin || user?.perms.some((p) => ['control_view', 'control_exec'].includes(p))) {
-      items.push({ key: '/control', icon: <ControlOutlined />, label: '启停管控' })
+    // 运维：启停管控（危险操作红色图标） + SQL 终端
+    if (has('control_view', 'control_exec', 'sql_terminal')) {
+      const ops: MenuProps['items'] = []
+      if (has('control_view', 'control_exec')) {
+        ops!.push({ key: '/control', icon: <ControlOutlined style={{ color: '#ff7875' }} />, label: '启停管控' })
+      }
+      if (has('sql_terminal')) {
+        ops!.push({ key: '/sql-terminal', icon: <CodeOutlined />, label: 'SQL 终端' })
+      }
+      items.push({ type: 'group', label: '运维', children: ops! })
     }
+    // 分析：巡检报表
+    if (has('reports_view')) {
+      items.push({
+        type: 'group',
+        label: '分析',
+        children: [{ key: '/reports', icon: <FileTextOutlined />, label: '巡检报表' }],
+      })
+    }
+    // 系统（仅管理员）：用户管理 + 系统配置，前面加分隔线
     if (user?.is_admin) {
-      items.push({ key: '/reports', icon: <FileTextOutlined />, label: '巡检报表' })
-      items.push({ key: '/sql-terminal', icon: <CodeOutlined />, label: 'SQL 终端' })
-      items.push({ key: '/users', icon: <UserOutlined />, label: '用户管理' })
-      items.push({ key: '/config', icon: <SettingOutlined />, label: '系统配置' })
+      items.push({ type: 'divider' })
+      items.push({
+        type: 'group',
+        label: '系统',
+        children: [
+          { key: '/users', icon: <UserOutlined />, label: '用户管理' },
+          { key: '/config', icon: <SettingOutlined />, label: '系统配置' },
+        ],
+      })
     }
     return items
   }, [user])

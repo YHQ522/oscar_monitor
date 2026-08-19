@@ -24,6 +24,12 @@ def test_parse_mem_win():
     assert parse_mem_pct("TotalMB=16000 FreeMB=8000 UsedMB=8000") == 50.0
 
 
+def test_parse_mem_linux_free_gi():
+    """free -h 输出带 Gi 单位（如 3.3Gi），须正确解析使用率。"""
+    out = "total used free shared buff/cache available\nMem: 3.3Gi 2.6Gi 138Mi 68Mi 851Mi 677Mi"
+    assert parse_mem_pct(out) == round(2.6 / 3.3 * 100, 1)
+
+
 def test_memory_score_segmented():
     """内存分段评分：数据库高内存占用（<80%）不扣分；接近耗尽才大幅扣分。"""
     from app.services.health import _memory_score

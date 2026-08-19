@@ -2,12 +2,12 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
-  Button, Space, Modal, Empty, Skeleton,
+  Button, Space, Modal, Empty, Skeleton, Tooltip,
 } from 'antd'
 import { App as AntApp } from 'antd'
 import {
   ReloadOutlined, EyeOutlined, DownloadOutlined, ThunderboltOutlined, PlusOutlined,
-  CloudServerOutlined, CheckCircleOutlined, CloseCircleOutlined, DashboardOutlined,
+  CloudServerOutlined, CheckCircleOutlined, CloseCircleOutlined, DashboardOutlined, AlertOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { api, downloadFile } from '../api/client'
@@ -21,6 +21,18 @@ function scoreColor(score: number | null): string {
   if (score >= 60) return '#6366f1'
   return '#ef4444'
 }
+
+// 资源状态着色：danger 红 / warning 橙 / healthy 绿 / 未采集 灰
+function resStatusColor(st?: string): string {
+  if (st === 'danger') return '#dc2626'
+  if (st === 'warning') return '#d97706'
+  if (st === 'healthy') return '#059669'
+  return '#94a3b8'
+}
+
+// 首页展示的资源指标（与后端 health details 键一致）
+const RES_KEYS = ['cpu', 'memory', 'disk'] as const
+const RES_LABELS: Record<(typeof RES_KEYS)[number], string> = { cpu: 'CPU', memory: '内存', disk: '磁盘' }
 
 // 解析 "3 条" / "0" → 数字
 function parseCount(v: string | undefined): number {
@@ -148,13 +160,25 @@ export default function DashboardPage() {
 
   const collectAll = async () => {
     setLoading(true)
-    try {
-      await Promise.all(servers.map((s) => api.post(`/api/servers/${s.id}/collect`)))
-      message.success('全部采集完成')
-    } catch (e) {
-      message.error((e as Error).message)
-    } finally {
-      setLoading(false)
+    // 逐台独立请求：快的服务器先完成先提示，慢的不会阻塞反馈，单台失败不影响其他台
+    const results = await Promise.allSettled(
+      servers.map(async (s) => {
+        const t0 = Date.now()
+        try {
+          await api.post(`/api/servers/${s.id}/collect`)
+          const cost = Math.max(1, Math.round((Date.now() - t0) / 1000))
+          message.success(`${s.name} 采集完成（约 ${cost} 秒）`)
+          return { name: s.name, ok: true }
+        } catch (e) {
+          message.error(`${s.name} 采集失败：${(e as Error).message}`)
+          return { name: s.name, ok: false }
+        }
+      }),
+    )
+    setLoading(false)
+    const ok = results.filter((r) => r.status === 'fulfilled' && r.value.ok).length
+    if (ok < servers.length) {
+      message.warning(`全部采集结束：成功 ${ok}/${servers.length} 台`)
     }
   }
 
@@ -201,6 +225,15 @@ export default function DashboardPage() {
     else buckets.bad++
   })
   const pctOf = (n: number) => (servers.length ? Math.round((n / servers.length) * 100) : 0)
+
+  // 资源告警统计：CPU/内存/磁盘任一 warning 或 danger 的服务器数
+  const resourceAlerts = servers.filter((s) => {
+    const d = scores[s.id]?.details || {}
+    return RES_KEYS.some((k) => {
+      const st = d[k]?.status
+      return st === 'warning' || st === 'danger'
+    })
+  }).length
 
   // 按数据库类型统计服务器数量（含仅系统）
   const typeCounts: Record<string, number> = {}
@@ -249,6 +282,7 @@ export default function DashboardPage() {
           { icon: <CheckCircleOutlined />, label: '在线运行', value: onlineCount, grad: 'linear-gradient(135deg,#10b981,#34d399)' },
           { icon: <CloseCircleOutlined />, label: '异常', value: abnormalCount, grad: 'linear-gradient(135deg,#ef4444,#f97316)' },
           { icon: <DashboardOutlined />, label: '平均健康分', value: avgScore, grad: 'linear-gradient(135deg,#f59e0b,#fbbf24)' },
+          { icon: <AlertOutlined />, label: '资源告警', value: resourceAlerts, grad: 'linear-gradient(135deg,#dc2626,#f43f5e)' },
         ].map((m) => (
           <div key={m.label} style={{ background: GLASS_BG, backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)', border: GLASS_BORDER, borderRadius: 20, padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16, boxShadow: GLASS_SHADOW }}>
             <div style={{ width: 50, height: 50, borderRadius: 15, background: m.grad, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 23, flex: 'none', boxShadow: '0 8px 18px rgba(0,0,0,0.12)' }}>{m.icon}</div>
@@ -279,6 +313,21 @@ export default function DashboardPage() {
                     <span style={{ color: '#6366f1' }}>连接 {details.sessions?.value ?? '—'}</span>
                     <span>慢SQL <b onClick={() => openDetail(s, 'slow')} style={CLICK_STYLE}>{slow}</b></span>
                     <span>死锁 <b onClick={() => openDetail(s, 'dead')} style={CLICK_STYLE}>{dead}</b></span>
+                    {RES_KEYS.map((k) => {
+                      const d = details[k]
+                      const color = resStatusColor(d?.status)
+                      // 磁盘显示最高占用盘的盘符/挂载点，悬停展示全部盘明细
+                      const text = k === 'disk' && d?.label
+                        ? `磁盘 ${d.value}·${d.label}`
+                        : `${RES_LABELS[k]} ${d?.value ?? '—'}`
+                      return (
+                        <Tooltip key={k} title={d?.detail || (k === 'disk' ? '磁盘使用率（最高占用盘）' : undefined)}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 6px', borderRadius: 999, background: `${color}1a`, color, border: `1px solid ${color}55`, fontWeight: 700 }}>
+                            {text}
+                          </span>
+                        </Tooltip>
+                      )
+                    })}
                   </div>
                 </div>
                 <div style={{ fontFamily: 'Consolas,monospace', fontSize: 22, fontWeight: 800, color: scoreColor(score), flex: 'none' }}>{score ?? '—'}</div>

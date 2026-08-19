@@ -1,7 +1,7 @@
 // 启停管控页：数据库服务 + 应用分组管控
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Card, Button, Tag, Space, Spin, Empty, Popconfirm, Modal } from 'antd'
+import { Card, Button, Tag, Space, Spin, Empty, Modal } from 'antd'
 import { App as AntApp } from 'antd'
 import { PlayCircleOutlined, ReloadOutlined, StopOutlined, EyeOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
@@ -33,22 +33,54 @@ function ControlButton({ action, onClick, disabled }: { action: string; onClick:
 
 export default function ControlPage() {
   const user = useAuth((s) => s.user)
-  const { message } = AntApp.useApp()
+  const { message, modal } = AntApp.useApp()
   const [servers, setServers] = useState<Server[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
-  const [modal, setModal] = useState<{ title: string; content: string } | null>(null)
+  const [outputModal, setOutputModal] = useState<{ title: string; content: string } | null>(null)
+  // 各服务/应用当前运行状态：key = db:<serverId> 或 app:<serverId>:<appName>
+  const [runningMap, setRunningMap] = useState<Record<string, boolean>>({})
 
   const canExec = user?.is_admin || user?.perms.includes('control_exec')
 
+  const keyOf = (server: Server, kind: 'db' | 'app', appName?: string) =>
+    kind === 'db' ? `db:${server.id}` : `app:${server.id}:${appName}`
+
+  // 静默查询状态（不弹消息/输出框）
+  const silentStatus = async (server: Server, kind: 'db' | 'app', appName?: string) => {
+    try {
+      const body = appName ? { action: 'status', app: appName } : { action: 'status' }
+      const resp = await api.post<ControlResp>(
+        `/api/servers/${server.id}/${kind === 'db' ? 'db-control' : 'app-control'}`,
+        body,
+      )
+      if (typeof resp.running === 'boolean') {
+        setRunningMap((m) => ({ ...m, [keyOf(server, kind, appName)]: resp.running! }))
+      }
+    } catch {
+      /* 静默失败：保持未知状态 */
+    }
+  }
+
   useEffect(() => {
     api.get<Server[]>('/api/servers')
-      .then((list) => setServers(list.filter((s) => s.in_control)))
+      .then((list) => {
+        const srv = list.filter((s) => s.in_control)
+        setServers(srv)
+        // 初始加载各服务/应用的运行状态
+        srv.forEach((s) => {
+          if (!s.skip_db) silentStatus(s, 'db')
+          for (const app of s.apps || []) {
+            if (app.in_control) silentStatus(s, 'app', app.name)
+          }
+        })
+      })
       .catch((e) => message.error(e.message))
       .finally(() => setLoading(false))
   }, [])
 
   const run = async (server: Server, kind: 'db' | 'app', action: string, appName?: string) => {
+    const key = keyOf(server, kind, appName)
     setBusy(`${server.id}-${kind}-${appName || 'db'}-${action}`)
     try {
       const body = appName ? { action, app: appName } : { action }
@@ -62,13 +94,51 @@ export default function ControlPage() {
         message.error(resp.msg)
       }
       if (resp.output) {
-        setModal({ title: `${server.name} - ${action} 输出`, content: resp.output })
+        setOutputModal({ title: `${server.name} - ${action} 输出`, content: resp.output })
       }
+      // 更新本地运行状态：优先用返回的 running；无则按动作推断；随后静默复查
+      if (typeof resp.running === 'boolean') {
+        setRunningMap((m) => ({ ...m, [key]: resp.running! }))
+      } else if (action === 'start' || action === 'restart') {
+        setRunningMap((m) => ({ ...m, [key]: true }))
+      } else if (action === 'stop') {
+        setRunningMap((m) => ({ ...m, [key]: false }))
+      }
+      if (action !== 'status') silentStatus(server, kind, appName)
     } catch (e) {
       message.error((e as Error).message)
     } finally {
       setBusy(null)
     }
+  }
+
+  // 启动/停止/重启统一入口：先做状态提示，再二次确认
+  const confirmAction = (server: Server, kind: 'db' | 'app', action: string, appName?: string) => {
+    const key = keyOf(server, kind, appName)
+    const running = runningMap[key]
+    const target = appName ? `应用「${appName}」` : '数据库服务'
+
+    if (action === 'start' && running === true) {
+      message.warning(`${target}已在运行中，无需重复启动`)
+      return
+    }
+    if (action === 'stop' && running === false) {
+      message.warning(`${target}已处于停止状态，无需重复停止`)
+      return
+    }
+
+    const isStop = action === 'stop'
+    const actionLabel = action === 'start' ? '启动' : action === 'stop' ? '停止' : '重启'
+    const stateHint = running === true ? '（当前状态：运行中）' : running === false ? '（当前状态：已停止）' : ''
+    const restartStopped = action === 'restart' && running === false
+    modal.confirm({
+      title: `确认${actionLabel} ${target}？`,
+      content: `即将对 ${server.name} 的${target}执行${actionLabel}操作${stateHint}。${restartStopped ? '服务当前已停止，重启操作将尝试拉起服务。' : ''}${isStop ? '停止服务期间相关业务将中断，请谨慎操作。' : ''}`,
+      okText: actionLabel,
+      okButtonProps: isStop ? { danger: true } : undefined,
+      cancelText: '取消',
+      onOk: () => run(server, kind, action, appName),
+    })
   }
 
   const groups = useMemo(() => {
@@ -115,11 +185,9 @@ export default function ControlPage() {
                 />
                 {canExec && (
                   <>
-                    <ControlButton action="start" disabled={busy !== null} onClick={() => run(s, 'db', 'start')} />
-                    <ControlButton action="stop" disabled={busy !== null} onClick={() => run(s, 'db', 'stop')} />
-                    <Popconfirm title={`确认重启 ${s.name} 的数据库服务？`} onConfirm={() => run(s, 'db', 'restart')}>
-                      <ControlButton action="restart" disabled={busy !== null} onClick={() => {}} />
-                    </Popconfirm>
+                    <ControlButton action="start" disabled={busy !== null} onClick={() => confirmAction(s, 'db', 'start')} />
+                    <ControlButton action="stop" disabled={busy !== null} onClick={() => confirmAction(s, 'db', 'stop')} />
+                    <ControlButton action="restart" disabled={busy !== null} onClick={() => confirmAction(s, 'db', 'restart')} />
                   </>
                 )}
               </Space>
@@ -146,11 +214,9 @@ export default function ControlPage() {
                   />
                   {canExec && (
                     <>
-                      <ControlButton action="start" disabled={busy !== null} onClick={() => run(server, 'app', 'start', app.name)} />
-                      <ControlButton action="stop" disabled={busy !== null} onClick={() => run(server, 'app', 'stop', app.name)} />
-                      <Popconfirm title={`确认重启 ${app.name}？`} onConfirm={() => run(server, 'app', 'restart', app.name)}>
-                        <ControlButton action="restart" disabled={busy !== null} onClick={() => {}} />
-                      </Popconfirm>
+                      <ControlButton action="start" disabled={busy !== null} onClick={() => confirmAction(server, 'app', 'start', app.name)} />
+                      <ControlButton action="stop" disabled={busy !== null} onClick={() => confirmAction(server, 'app', 'stop', app.name)} />
+                      <ControlButton action="restart" disabled={busy !== null} onClick={() => confirmAction(server, 'app', 'restart', app.name)} />
                     </>
                   )}
                 </Space>
@@ -161,14 +227,14 @@ export default function ControlPage() {
       ))}
 
       <Modal
-        title={modal?.title}
-        open={!!modal}
-        onCancel={() => setModal(null)}
+        title={outputModal?.title}
+        open={!!outputModal}
+        onCancel={() => setOutputModal(null)}
         footer={null}
         width={720}
       >
         <pre className="mono" style={{ whiteSpace: 'pre-wrap', background: '#0f172a', color: '#e2e8f0', padding: 12, borderRadius: 8, maxHeight: 480, overflow: 'auto' }}>
-          {modal?.content}
+          {outputModal?.content}
         </pre>
       </Modal>
     </div>

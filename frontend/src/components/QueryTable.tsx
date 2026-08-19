@@ -1,4 +1,4 @@
-// 通用查询结果表格：展示 columns/rows，支持错误态与导出
+// 通用查询结果表格：展示 columns/rows，支持列名中文化与导出
 import { Table, Tag, Button, Space } from 'antd'
 import { DownloadOutlined } from '@ant-design/icons'
 import type { QueryResult } from '../api/types'
@@ -7,9 +7,13 @@ interface Props {
   result?: QueryResult
   title?: string
   onExport?: (result: QueryResult) => void
+  /** 列名翻译表（键为归一化：小写、去空格/下划线），由 /api/meta 返回 */
+  columnLabels?: Record<string, string>
 }
 
-export default function QueryTable({ result, title, onExport }: Props) {
+const norm = (c: string) => c.toLowerCase().replace(/ /g, '').replace(/_/g, '')
+
+export default function QueryTable({ result, title, onExport, columnLabels }: Props) {
   if (!result) return null
 
   if (result.error) {
@@ -20,8 +24,10 @@ export default function QueryTable({ result, title, onExport }: Props) {
     )
   }
 
+  const zh = (col: string) => (columnLabels ? columnLabels[norm(col)] ?? col : col)
+
   const columns = (result.columns || []).map((col, i) => ({
-    title: col,
+    title: zh(col),
     dataIndex: i.toString(),
     key: i.toString(),
     ellipsis: true,
@@ -49,9 +55,9 @@ export default function QueryTable({ result, title, onExport }: Props) {
                   if (onExport) {
                     onExport(result)
                   } else {
-                    // 默认导出为 CSV
+                    // 默认导出为 CSV（列名用中文）
                     const csv = [
-                      result.columns.join(','),
+                      result.columns.map(zh).join(','),
                       ...(result.rows || []).map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')),
                     ].join('\n')
                     const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' })

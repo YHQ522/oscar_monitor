@@ -82,7 +82,7 @@ def delete_server(
 def meta():
     """返回前端渲染所需的元数据：数据库类型、查询集、标签、系统开关。"""
     from ..adapters import all_adapters, get_query_sets
-    from ..core.constants import OS_CHECK_LABELS, QUERY_LABELS
+    from ..core.constants import OS_CHECK_LABELS, QUERY_LABELS, COLUMN_TRANSLATE
     from ..services.config_service import get_config_service
 
     return {
@@ -90,6 +90,7 @@ def meta():
         "query_sets": {t: get_query_sets(t) for t in all_adapters()},
         "query_labels": QUERY_LABELS,
         "os_check_labels": OS_CHECK_LABELS,
+        "column_labels": COLUMN_TRANSLATE,
         "os_checks": ["memory", "disk", "cpu", "install_path", "os_errors", "db_log_errors"],
         # 系统级日志持久化开关（服务器级 persist_enabled 依赖它）
         "log_enabled": bool(get_config_service().get().get("log_enabled", False)),

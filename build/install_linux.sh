@@ -30,13 +30,18 @@ mkdir -p "$INSTALL_DIR"
 install -m 0755 "$(dirname "$0")/oscar-monitor" "$INSTALL_DIR/oscar-monitor"
 mkdir -p "$INSTALL_DIR/data"
 
-# 首次安装写入初始端口配置（升级安装保留已有 config.json）
+# 写入/更新监听端口配置（升级安装仅更新 port 字段，保留其余配置）
 CFG="$INSTALL_DIR/data/config.json"
-if [ ! -f "$CFG" ]; then
+if [ -f "$CFG" ]; then
+    if grep -q '"port"' "$CFG"; then
+        sed -i -E 's/("port"[[:space:]]*:[[:space:]]*)[0-9]+/\1'"$PORT"'/' "$CFG"
+    else
+        sed -i '0,/{/s/{/{\n  "port": '"$PORT"',/' "$CFG"
+    fi
+    echo ">>> 监听端口更新为: ${PORT}（其余配置保留）"
+else
     echo "{\"port\": $PORT}" > "$CFG"
     echo ">>> 监听端口: ${PORT}"
-else
-    echo ">>> 已存在 config.json，保留现有端口配置"
 fi
 
 # 注册 systemd 服务（开机自启 + 崩溃自动重启；端口由 config.json 决定）
@@ -44,6 +49,8 @@ cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
 [Unit]
 Description=oscar-monitor 数据库监控管控平台
 After=network.target
+# 等待数据库服务先启动（监控与数据库同机部署时建议启用；服务不存在时 systemd 自动忽略）
+After=oscardb_OSRDBd.service oscaragentd.service
 
 [Service]
 Type=simple
