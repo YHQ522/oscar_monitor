@@ -677,17 +677,17 @@ export default function DashboardPage() {
 
       {/* ===== 活动会话弹窗 ===== */}
       <Modal
-        title={actModal ? `${actModal.name} · 活动会话` : ''}
+        title={actModal ? `${actModal.name} · 业务会话` : ''}
         open={!!actModal}
         onCancel={() => setActModal(null)}
         footer={null}
-        width={860}
+        width={960}
         destroyOnHidden
       >
         {actModal && (
           <QueryTable
             result={cache[actModal.id]?.db_queries?.performance?.active_queries}
-            title="活动会话（当前 SQL 非空的会话）"
+            title="业务会话（不含监控自身连接）"
             columnLabels={columnLabels}
           />
         )}

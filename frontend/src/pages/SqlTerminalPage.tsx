@@ -24,7 +24,7 @@ const SQL_SNIPPETS: Record<string, { label: string; sql: string }[]> = {
     { label: '版本信息', sql: 'SELECT VERSION();' },
     { label: '当前连接数', sql: 'SELECT COUNT(*) AS CONNECTION_COUNT FROM V_SYS_SESSIONS;' },
     { label: '连接来源分布', sql: 'SELECT COUNT(*), USER_IP FROM V_SYS_SESSIONS GROUP BY USER_IP ORDER BY COUNT(*) DESC;' },
-    { label: '活跃 SQL', sql: 'SELECT "SESSION ID", "CURRENT SQL", USER_IP, "CURRENT USER" FROM V_SYS_SESSIONS WHERE "CURRENT SQL" IS NOT NULL;' },
+    { label: '业务会话', sql: 'SELECT "SESSION ID", APPNAME, USER_IP, "CURRENT USER", "CURRENT SQL", "LAST SQL", LOGONTIME FROM V_SYS_SESSIONS WHERE APPNAME != \'isql\';' },
     { label: '慢 SQL Top20', sql: 'SELECT "TIME(s)", SQL FROM V_SYS_TOP_COST_SQLS WHERE "TIME(s)" > 0.5 ORDER BY "TIME(s)" DESC LIMIT 20;' },
     { label: '阻塞会话', sql: 'SELECT * FROM V$LOCK WHERE BLOCK=1;' },
     { label: '等待链', sql: 'SELECT * FROM V$WAIT_CHAINS;' },

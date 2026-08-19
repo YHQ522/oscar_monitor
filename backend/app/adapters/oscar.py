@@ -47,11 +47,11 @@ QUERY_SETS: dict = {
     "performance": {
         "label": "性能监控",
         "queries": {
-            "session_count": "SELECT COUNT(*) AS CONNECTION_COUNT FROM V_SYS_SESSIONS;",
-            "session_by_ip": "SELECT COUNT(*), USER_IP FROM V_SYS_SESSIONS GROUP BY USER_IP ORDER BY COUNT(*) DESC;",
+            "session_count": "SELECT COUNT(*) AS CONNECTION_COUNT FROM V_SYS_SESSIONS WHERE APPNAME != 'isql';",
+            "session_by_ip": "SELECT COUNT(*), USER_IP FROM V_SYS_SESSIONS WHERE APPNAME != 'isql' GROUP BY USER_IP ORDER BY COUNT(*) DESC;",
             "deadlock_count": "SELECT COUNT(*) FROM V$SESSION WHERE SID IN (SELECT SID FROM V$LOCK WHERE BLOCK=1);",
             "wait_chains": "SELECT * FROM V$WAIT_CHAINS;",
-            "active_queries": "SELECT \"SESSION ID\", \"CURRENT SQL\", USER_IP, \"CURRENT USER\" FROM V_SYS_SESSIONS WHERE \"CURRENT SQL\" IS NOT NULL;",
+            "active_queries": "SELECT \"SESSION ID\", APPNAME, USER_IP, \"CURRENT USER\", \"CURRENT SQL\", \"LAST SQL\", LOGONTIME FROM V_SYS_SESSIONS WHERE APPNAME != 'isql';",
             "non_auto_commit": "SELECT COUNT(*) AS NON_AUTO_COMMIT_COUNT FROM V$TRANSACTION WHERE EXPLICIT_TRANS='t';",
             "idle_non_auto_commit": "SELECT COUNT(*) AS IDLE_NON_AUTO_COMMIT FROM V$TRANSACTION VT, V$SESSION VS WHERE VT.SESSION_ID=VS.SID AND VT.EXPLICIT_TRANS='t' AND VS.CURRENT_SQL IS NULL;",
             "db_memory": "SELECT * FROM V$GLOBAL_MEMORY;",
