@@ -70,7 +70,8 @@ export default function ConfigPage() {
       const logDb: LogDbConfig = {
         db_type: values.db_type,
         host: values.host,
-        port: values.port,
+        // 注意：必须用日志库表单 vDb.port（数据库端口），不能用 values.port（会被全局表单的服务端口覆盖）
+        port: vDb.port,
         user: values.user,
         pass: values.pass,
         dbname: values.dbname,
@@ -98,7 +99,7 @@ export default function ConfigPage() {
         log_retention_days: values.log_retention_days,
         collect_workers: values.collect_workers,
         auto_collect_interval: values.auto_collect_interval,
-        port: values.port,
+        port: vGlobal.port,
         trend_retention_days: values.trend_retention_days,
         ssh_connect_timeout: values.ssh_connect_timeout,
         ssh_exec_timeout: values.ssh_exec_timeout,
