@@ -38,3 +38,40 @@ jobs:
           path: |
             build/dist/oscar-monitor
             build/dist/oscar-monitor-setup-2.0.0-linux-x86_64.sh
+
+  # 麒麟 V10 兼容构建:银河麒麟高级服务器操作系统 V10（CentOS 8 系，glibc 2.28）
+  # 在 Rocky Linux 8 容器（glibc 2.28）中打包，产物可在 Kylin V10 服务器版直接运行
+  build-kylin:
+    runs-on: ubuntu-latest
+    container:
+      image: rockylinux:8
+    steps:
+      - name: 安装构建工具链
+        run: |
+          dnf install -y --setopt=tsflags=nodocs git gcc make tar gzip \
+            openssl-devel zlib-devel bzip2-devel libffi-devel xz-devel
+
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 安装 Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 打包 Kylin 兼容单文件二进制 + 自解压安装包
+        run: bash build/build_linux.sh
+
+      - name: 上传 Kylin 构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: oscar-monitor-kylin-v10-x86_64
+          if-no-files-found: error
+          path: |
+            build/dist/oscar-monitor
+            build/dist/oscar-monitor-setup-2.0.0-linux-x86_64.sh
