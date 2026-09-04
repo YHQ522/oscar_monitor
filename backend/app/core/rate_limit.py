@@ -44,6 +44,11 @@ class LoginRateLimiter:
     def record_failure(self, ip: str) -> None:
         with self._lock:
             self._attempts.setdefault(ip, []).append(time.time())
+            # 懒清理：条目过多时移除空/过期记录，防止字典无界增长
+            if len(self._attempts) > 512:
+                now = time.time()
+                for k in [k for k, v in self._attempts.items() if not v or now - max(v) >= self.window]:
+                    self._attempts.pop(k, None)
 
     def set_username(self, ip: str, username: str) -> None:
         """记录封禁条目关联的用户名（仅用于展示）。"""

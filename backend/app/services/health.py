@@ -188,6 +188,30 @@ def extract_metrics(data: dict[str, Any]) -> dict[str, Any]:
     return point
 
 
+# 健康分结果缓存：同一采集快照（timestamp 相同）无需重复解析计算
+_score_cache: dict[str, tuple[str, int | None, dict[str, Any]]] = {}
+
+
+def calc_health_score_cached(
+    server_id: str,
+    data: dict[str, Any],
+    enabled_categories: list[str] | None = None,
+    enabled_os_checks: list[str] | None = None,
+    skip_db: bool = False,
+) -> tuple[int | None, dict[str, Any]]:
+    """带缓存的健康评分：按 (server_id, 采集时间戳) 复用上一次计算结果。
+
+    采集不变时 /api/health 轮询直接命中缓存，避免每 30 秒全量正则解析。
+    """
+    ts = data.get("timestamp", "")
+    hit = _score_cache.get(server_id)
+    if hit and hit[0] == ts:
+        return hit[1], hit[2]
+    score, details = calc_health_score(data, enabled_categories, enabled_os_checks, skip_db)
+    _score_cache[server_id] = (ts, score, details)
+    return score, details
+
+
 def calc_health_score(
     data: dict[str, Any],
     enabled_categories: list[str] | None = None,

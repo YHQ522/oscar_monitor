@@ -70,4 +70,5 @@ class OscarAdapter(DBAdapter):
     cli_tool = "isql"
     cli_heredoc = True
     cli_win_file = True
+    merge_queries = True  # 已实测：多语句单会话执行 + 错误不中断后续查询
     query_sets = QUERY_SETS

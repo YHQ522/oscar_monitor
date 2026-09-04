@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from ..models.server import ServerCreate, ServerOut, ServerUpdate
 from ..services.cache import CacheStore
 from ..services.collector import test_connection
-from ..services.health import calc_health_score, smooth_score
+from ..services.health import calc_health_score_cached, smooth_score
 from ..services.persist import LogPersistService
 from ..services.scheduler import CollectScheduler
 from ..services.server_service import ServerService
@@ -78,14 +79,21 @@ def delete_server(
 
 
 # ═══════════════ 元数据 ═══════════════
+_meta_cache: tuple[float, dict] | None = None  # (缓存时间, 数据)；内容静态，短 TTL 避免每次重建
+
+
 @router.get("/meta", dependencies=[Depends(any_permission("dashboard", "servers_view"))])
 def meta():
     """返回前端渲染所需的元数据：数据库类型、查询集、标签、系统开关。"""
+    global _meta_cache
+    now = time.monotonic()
+    if _meta_cache and now - _meta_cache[0] < 5:
+        return _meta_cache[1]
     from ..adapters import all_adapters, get_query_sets
     from ..core.constants import OS_CHECK_LABELS, QUERY_LABELS, COLUMN_TRANSLATE
     from ..services.config_service import get_config_service
 
-    return {
+    result = {
         "db_types": all_adapters(),
         "query_sets": {t: get_query_sets(t) for t in all_adapters()},
         "query_labels": QUERY_LABELS,
@@ -95,6 +103,8 @@ def meta():
         # 系统级日志持久化开关（服务器级 persist_enabled 依赖它）
         "log_enabled": bool(get_config_service().get().get("log_enabled", False)),
     }
+    _meta_cache = (now, result)
+    return result
 
 
 # ═══════════════ 采集 ═══════════════
@@ -145,7 +155,8 @@ def health_score(
     if not cached:
         return {"score": None, "msg": "暂无数据，请先采集"}
     server = server_service.get(server_id) or {}
-    score, details = calc_health_score(
+    score, details = calc_health_score_cached(
+        server_id,
         cached,
         server.get("enabled_categories"),
         server.get("enabled_os_checks"),
@@ -181,7 +192,8 @@ def health_all(
         if not cached:
             result[s["id"]] = {"score": None, "details": {}}
             continue
-        score, details = calc_health_score(
+        score, details = calc_health_score_cached(
+            s["id"],
             cached,
             s.get("enabled_categories"),
             s.get("enabled_os_checks"),

@@ -20,6 +20,8 @@ class DBAdapter:
     cli_heredoc: bool = True
     cli_win_file: bool = True
     cli_no_if_not_exists: bool = False
+    # 是否支持多查询合并为单次 CLI 会话执行（采集提速）；仅已验证的适配器开启
+    merge_queries: bool = False
 
     # DDL 类型映射
     ddl_serial: str = "serial"

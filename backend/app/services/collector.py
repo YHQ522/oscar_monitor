@@ -15,10 +15,12 @@ from ..adapters import get_adapter, get_query_sets
 from ..config import Settings, get_settings
 from ..core.constants import DB_RELATED_OS_CHECKS, OS_CHECKS_LINUX, OS_CHECKS_WIN
 from ..core.db_exec import (
+    build_merged_sql,
     build_sql_cmd,
     exec_sql,
     output_has_error,
     parse_isql_output,
+    parse_merged_isql_output,
     parse_table_output,
     ssh_exec_sql,
     temp_sql_path,
@@ -33,7 +35,7 @@ def _cfg() -> Settings:
 
 
 # ═══════════════ 采集 ═══════════════
-def collect_sql_queries(server: dict[str, Any], enabled_categories: list[str]) -> dict[str, Any]:
+def collect_sql_queries(server: dict[str, Any], enabled_categories: list[str], client: Any = None) -> dict[str, Any]:
     query_sets = get_query_sets(server.get("db_type"))
     results: dict[str, Any] = {}
     all_queries = [
@@ -46,30 +48,62 @@ def collect_sql_queries(server: dict[str, Any], enabled_categories: list[str]) -
         return results
 
     remote = need_ssh(server)
-    client = None
+    adapter = get_adapter(server.get("db_type"))
+    own_client = False
     try:
-        if remote:
+        if remote and client is None:
             client = ssh_connect(server)
+            own_client = True
         sql_timeout = _cfg().ssh_exec_timeout
-        for cat, qname, sql in all_queries:
-            try:
-                if remote:
-                    out, err, ec = ssh_exec_sql(client, server, sql, timeout=sql_timeout)
-                else:
-                    sql_file = temp_sql_path(server)
-                    _, cmd = build_sql_cmd(server, sql, sql_file)
-                    out, err, ec = run_local(cmd, timeout=sql_timeout)
-            except Exception as e:  # noqa: BLE001
-                results.setdefault(cat, {})[qname] = {"query": qname, "error": str(e), "columns": [], "rows": []}
-                continue
-            if ec != 0 or output_has_error(out):
-                results.setdefault(cat, {})[qname] = {
-                    "query": qname, "error": (err or out or "执行失败").strip()[:500], "columns": [], "rows": [],
-                }
+
+        if adapter.merge_queries:
+            # 合并为单次 CLI 会话执行全部查询（每条查询前插标记行），避免重复启动 CLI
+            merged = build_merged_sql(all_queries)
+            if remote:
+                out, err, ec = ssh_exec_sql(client, server, merged, timeout=sql_timeout)
             else:
-                results.setdefault(cat, {})[qname] = parse_isql_output(out, qname)
+                sql_file = temp_sql_path(server)
+                _, cmd = build_sql_cmd(server, merged, sql_file)
+                out, err, ec = run_local(cmd, timeout=sql_timeout)
+            global_err = (err or "").strip()
+            blocks = parse_merged_isql_output(out)
+            for cat, qname, _sql in all_queries:
+                block = blocks.get(f"{cat}:{qname}")
+                if not block or not block.strip():
+                    # 无输出块：查询执行失败（错误信息通常在全局 err 中）
+                    results.setdefault(cat, {})[qname] = {
+                        "query": qname,
+                        "error": (global_err or "查询无输出（可能执行失败）")[:500],
+                        "columns": [], "rows": [],
+                    }
+                elif ec != 0 or output_has_error(block):
+                    results.setdefault(cat, {})[qname] = {
+                        "query": qname,
+                        "error": (block or global_err or "执行失败").strip()[:500],
+                        "columns": [], "rows": [],
+                    }
+                else:
+                    results.setdefault(cat, {})[qname] = parse_isql_output(block, qname)
+        else:
+            for cat, qname, sql in all_queries:
+                try:
+                    if remote:
+                        out, err, ec = ssh_exec_sql(client, server, sql, timeout=sql_timeout)
+                    else:
+                        sql_file = temp_sql_path(server)
+                        _, cmd = build_sql_cmd(server, sql, sql_file)
+                        out, err, ec = run_local(cmd, timeout=sql_timeout)
+                except Exception as e:  # noqa: BLE001
+                    results.setdefault(cat, {})[qname] = {"query": qname, "error": str(e), "columns": [], "rows": []}
+                    continue
+                if ec != 0 or output_has_error(out):
+                    results.setdefault(cat, {})[qname] = {
+                        "query": qname, "error": (err or out or "执行失败").strip()[:500], "columns": [], "rows": [],
+                    }
+                else:
+                    results.setdefault(cat, {})[qname] = parse_isql_output(out, qname)
     finally:
-        if client:
+        if client and own_client:
             client.close()
     return results
 
@@ -421,7 +455,25 @@ def _parse_os_check(check_name: str, raw: str, elog_hours: float = 24) -> dict[s
     return result
 
 
-def collect_os_info(server: dict[str, Any], enabled_os_checks: list[str]) -> dict[str, Any]:
+def _win_os_merged_cmd(cmds: list[tuple[str, str]], sep: str) -> str:
+    """多个 Windows OS 检查命令合并为一次 PowerShell 进程执行。
+
+    每个检查命令提取其 `-Command "..."` 内部脚本后按标记 Write-Host 拼接，
+    避免 5 个检查各自冷启动 PowerShell（每个约 1-2 秒）。
+    """
+    inners: list[str] = []
+    for _, cmd in cmds:
+        c = cmd.strip()
+        if c.startswith("powershell -Command"):
+            c = c[len("powershell -Command"):].strip()
+        if c.startswith('"') and c.endswith('"'):
+            c = c[1:-1]
+        inners.append(c)
+    body = ("; Write-Host '" + sep + "'; ").join(inners)
+    return f"powershell -Command \"$ErrorActionPreference='SilentlyContinue'; Write-Host '{sep}'; " + body + '"'
+
+
+def collect_os_info(server: dict[str, Any], enabled_os_checks: list[str], client: Any = None) -> dict[str, Any]:
     results: dict[str, Any] = {}
     os_checks = _os_checks_map(server)
     # db_log_errors 单独采集（路径缓存/时间窗逻辑），其余系统检查合并执行
@@ -438,9 +490,10 @@ def collect_os_info(server: dict[str, Any], enabled_os_checks: list[str]) -> dic
     # Windows 下命令含引号嵌套，但复用一个 SSH 连接逐个执行，避免多次握手拖慢采集
     if use_ps:
         os_timeout = _cfg().os_cmd_timeout
-        client = None
-        if remote:
+        own_client = False
+        if client is None and remote:
             client = ssh_connect(server, timeout=_cfg().ssh_connect_timeout)
+            own_client = True
 
         def _ps_run(cmd: str) -> tuple[str, str, int]:
             if remote:
@@ -449,16 +502,20 @@ def collect_os_info(server: dict[str, Any], enabled_os_checks: list[str]) -> dic
             return proc.stdout, proc.stderr, proc.returncode
 
         try:
-            for check_name, cmd in cmds:
-                try:
-                    out, err, ec = _ps_run(cmd)
-                except Exception as e:  # noqa: BLE001
+            # 合并为一次 PowerShell 进程执行全部检查（标记行分隔），避免每个检查单独冷启动
+            merged_cmd = _win_os_merged_cmd(cmds, sep)
+            try:
+                out, err, ec = _ps_run(merged_cmd)
+            except Exception as e:  # noqa: BLE001
+                for check_name, _cmd in cmds:
                     results[check_name] = {"output": "", "error": str(e), "exit_code": -1}
-                    continue
-                raw = out.strip() or err.strip()
+                out, err, ec = "", "", -1
+            blocks = out.split(sep)
+            for i, (check_name, _cmd) in enumerate(cmds):
+                raw = (blocks[i + 1] if i + 1 < len(blocks) else "").strip()
                 result = _parse_os_check(check_name, raw)
                 result["error"] = "" if raw else (err.strip()[:500] if err else "")
-                result["exit_code"] = ec
+                result["exit_code"] = ec if raw else (result.get("exit_code", ec))
                 results[check_name] = result
 
             # Windows 目标机的数据库错误日志：带目录缓存，避免每次全盘递归扫描
@@ -487,7 +544,7 @@ def collect_os_info(server: dict[str, Any], enabled_os_checks: list[str]) -> dic
                 result["exit_code"] = ec
                 results["db_log_errors"] = result
         finally:
-            if client:
+            if client and own_client:
                 client.close()
         return results
 
@@ -497,17 +554,20 @@ def collect_os_info(server: dict[str, Any], enabled_os_checks: list[str]) -> dic
     full_cmd = "(" + "echo " + qsep + "; " + cmds_str + ")"
 
     os_timeout = _cfg().os_cmd_timeout
+    own_client = False
     try:
-        if remote:
+        if remote and client is None:
             client = ssh_connect(server, timeout=_cfg().ssh_connect_timeout)
-            try:
-                out, err, ec = ssh_exec(client, full_cmd, timeout=os_timeout)
-            finally:
-                client.close()
+            own_client = True
+        if remote:
+            out, err, ec = ssh_exec(client, full_cmd, timeout=os_timeout)
         else:
             out, err, ec = run_local(full_cmd, timeout=os_timeout)
     except Exception as e:  # noqa: BLE001
         out, err, ec = "", str(e), -1
+    finally:
+        if client and own_client:
+            client.close()
 
     blocks = out.split(sep)
     for i, (check_name, _) in enumerate(cmds):
@@ -537,7 +597,7 @@ def collect_os_info(server: dict[str, Any], enabled_os_checks: list[str]) -> dic
     return results
 
 
-def collect_apps(server: dict[str, Any]) -> list[dict[str, Any]]:
+def collect_apps(server: dict[str, Any], client: Any = None) -> list[dict[str, Any]]:
     apps = server.get("apps", [])
     if not apps:
         return []
@@ -558,13 +618,13 @@ def collect_apps(server: dict[str, Any]) -> list[dict[str, Any]]:
         )
 
     app_timeout = _cfg().app_cmd_timeout
+    own_client = False
     try:
-        if remote:
+        if remote and client is None:
             client = ssh_connect(server, timeout=_cfg().ssh_connect_timeout)
-            try:
-                out, err, ec = ssh_exec(client, full_cmd, timeout=app_timeout)
-            finally:
-                client.close()
+            own_client = True
+        if remote:
+            out, err, ec = ssh_exec(client, full_cmd, timeout=app_timeout)
         else:
             out, err, ec = run_local(full_cmd, timeout=app_timeout)
 
@@ -578,6 +638,9 @@ def collect_apps(server: dict[str, Any]) -> list[dict[str, Any]]:
     except Exception as e:  # noqa: BLE001
         for a in apps:
             results.append({"name": a.get("name", str(a.get("port", ""))), "running": False, "status": "检查失败: " + str(e)[:100]})
+    finally:
+        if client and own_client:
+            client.close()
     return results
 
 
@@ -595,13 +658,22 @@ def collect_all(
         # 仅系统监控：不采集任何数据库内容，并排除依赖数据库的系统检查项
         enabled_categories = []
         enabled_os_checks = [c for c in enabled_os_checks if c not in DB_RELATED_OS_CHECKS]
-    return {
-        "server": server.get("name", server.get("ssh_host", "unknown")),
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "os_info": collect_os_info(server, enabled_os_checks),
-        "db_queries": collect_sql_queries(server, enabled_categories),
-        "apps": collect_apps(server),
-    }
+    # SSH 连接复用：一次采集全程仅一次握手（SQL + OS + 应用状态共用）
+    remote = need_ssh(server)
+    client = None
+    try:
+        if remote:
+            client = ssh_connect(server, timeout=_cfg().ssh_connect_timeout)
+        return {
+            "server": server.get("name", server.get("ssh_host", "unknown")),
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "os_info": collect_os_info(server, enabled_os_checks, client),
+            "db_queries": collect_sql_queries(server, enabled_categories, client),
+            "apps": collect_apps(server, client),
+        }
+    finally:
+        if client:
+            client.close()
 
 
 # ═══════════════ 连接测试 ═══════════════

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 from ..config import Settings, get_settings
@@ -25,12 +26,23 @@ def _write_file(path, data: dict[str, Any]) -> None:
 
 
 class ConfigService:
+    _CACHE_TTL = 2.0  # 读缓存 TTL（秒）：避免每次请求都读磁盘；保存后立即失效
+
     def __init__(self, settings: Settings):
         self.settings = settings
+        self._cache: tuple[float, dict[str, Any]] | None = None
 
     def get(self) -> dict[str, Any]:
-        """返回配置（log_db / 通知密码脱敏）。"""
+        """返回配置（log_db / 通知密码脱敏）。带短 TTL 内存缓存，避免频繁读磁盘。"""
+        now = time.monotonic()
+        if self._cache and now - self._cache[0] < self._CACHE_TTL:
+            return self._cache[1]
         cfg = _read_file(self.settings.config_file)
+        result = self._build(cfg)
+        self._cache = (now, result)
+        return result
+
+    def _build(self, cfg: dict[str, Any]) -> dict[str, Any]:
         log_db = cfg.get("log_db", {}) or {}
         return {
             "log_db": {
@@ -92,6 +104,7 @@ class ConfigService:
             if key in data:
                 cfg[key] = data[key]
         _write_file(self.settings.config_file, cfg)
+        self._cache = None  # 保存后立即失效读缓存
         # 同步 Settings 单例
         self._sync_settings(cfg)
         # 通知配置变更后重建通知器，使新配置立即生效

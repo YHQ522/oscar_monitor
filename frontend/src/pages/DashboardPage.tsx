@@ -93,6 +93,15 @@ function dbTypeMeta(s: Server): { label: string; grad: string } {
 // 可点击数字样式
 const CLICK_STYLE: React.CSSProperties = { cursor: 'pointer', fontWeight: 700, padding: '0 5px', borderRadius: 6, background: 'rgba(99,102,241,0.1)', color: '#6366f1' }
 
+// 离线胶囊徽章（名称旁/列表行内复用）
+function OfflineBadge({ withMargin = false }: { withMargin?: boolean }) {
+  return (
+    <span style={{ color: '#dc2626', fontSize: 11, fontWeight: 800, marginLeft: withMargin ? 6 : 0, padding: '0 6px', borderRadius: 999, background: 'rgba(220,38,38,0.1)', border: '1px solid rgba(220,38,38,0.35)' }}>
+      离线
+    </span>
+  )
+}
+
 // 日志记录类型（慢SQL/死锁）
 interface LogRow {
   check_type?: string
@@ -347,9 +356,9 @@ export default function DashboardPage() {
               <div key={s.id} style={{ background: 'rgba(255,255,255,0.6)', borderRadius: 14, padding: 14, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div style={{ width: 38, height: 38, borderRadius: 11, background: meta.grad, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 700, flex: 'none' }}>{meta.label}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="name-link" style={{ fontWeight: 700, fontSize: 14, color: TEXT_MAIN, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} onClick={() => navigate(`/server/${s.id}`)}>
+                  <div className="link-text" style={{ fontWeight: 700, fontSize: 14, color: TEXT_MAIN, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} onClick={() => navigate(`/server/${s.id}`)}>
                     {s.name}
-                    {cache[s.id]?.status === 'offline' && <span style={{ color: '#dc2626', fontSize: 11, fontWeight: 800, marginLeft: 6, padding: '0 6px', borderRadius: 999, background: 'rgba(220,38,38,0.1)', border: '1px solid rgba(220,38,38,0.35)' }}>离线</span>}
+                    {cache[s.id]?.status === 'offline' && <OfflineBadge withMargin />}
                   </div>
                   <div style={{ fontSize: 11, color: TEXT_SUB }}>
                     {s.ssh_host || '本地'}:{s.ssh_port ?? 22} · {s.skip_db ? '仅系统' : (s.db_type || '').toUpperCase()}
@@ -667,7 +676,7 @@ export default function DashboardPage() {
               style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 12px', borderRadius: 10, borderBottom: '1px solid rgba(148,163,184,0.15)' }}
             >
               <span style={{ flex: 1, color: TEXT_MAIN, fontWeight: 600 }}>{s.name}</span>
-              {cache[s.id]?.status === 'offline' && <span style={{ fontSize: 11, padding: '1px 8px', borderRadius: 999, color: '#dc2626', background: 'rgba(220,38,38,0.1)', border: '1px solid rgba(220,38,38,0.35)' }}>离线</span>}
+              {cache[s.id]?.status === 'offline' && <OfflineBadge />}
               <b style={{ fontFamily: 'Consolas,monospace', fontSize: 18, color: perfModal === 'dead' ? '#dc2626' : perfModal === 'slow' ? '#d97706' : '#6366f1' }}>{v ?? '—'}</b>
             </div>
           )

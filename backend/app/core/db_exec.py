@@ -203,6 +203,42 @@ def run_local_interruptible(
 
 
 # ═══════════════ 输出解析 ═══════════════
+_MERGE_MARK_RE = re.compile(r"^\s*===Q:([^=]+)===\s*$")
+
+
+def build_merged_sql(all_queries: list[tuple[str, str, str]]) -> str:
+    """多查询合并脚本：每条查询前插入标记查询（SELECT '===Q:cat:qname==='）。
+
+    标记查询输出固定三行（表头/分隔线/标记值），解析时按标记行分割，
+    从而用一次 isql 会话执行全部采集查询（避免每条查询重复启动 CLI）。
+    """
+    parts: list[str] = []
+    for cat, qname, sql in all_queries:
+        q = sql.strip().rstrip(";").strip()
+        parts.append(f"SELECT '===Q:{cat}:{qname}===' AS ___Q___;")
+        parts.append(q + ";")
+    return "\n".join(parts) + "\n"
+
+
+def parse_merged_isql_output(output: str) -> dict[str, str]:
+    """按标记行分割合并输出 → {'cat:qname': 查询输出块文本}。"""
+    blocks: dict[str, str] = {}
+    current: str | None = None
+    buf: list[str] = []
+    for raw in output.splitlines():
+        m = _MERGE_MARK_RE.match(raw.strip())
+        if m:
+            if current is not None:
+                blocks[current] = "\n".join(buf)
+            current = m.group(1)
+            buf = []
+        elif current is not None:
+            buf.append(raw)
+    if current is not None:
+        blocks[current] = "\n".join(buf)
+    return blocks
+
+
 def parse_isql_output(output: str, query_name: str) -> dict[str, Any]:
     """解析 isql 类管道输出为 {columns, rows}。"""
     output = strip_ansi(output)

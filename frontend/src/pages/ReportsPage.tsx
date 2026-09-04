@@ -8,6 +8,7 @@ import { FileExcelOutlined, DeleteOutlined } from '@ant-design/icons'
 import { api, downloadFile } from '../api/client'
 import type { Server, ExportHistoryItem } from '../api/types'
 import { useServerCache } from '../hooks/useSSE'
+import { offlineSuffix } from '../components/ServerStatusTag'
 
 const CATEGORIES = [
   { id: 'basic_info', label: '基础信息' },
@@ -158,7 +159,7 @@ export default function ReportsPage() {
             placeholder="选择要导出的服务器"
             value={selected}
             onChange={setSelected}
-            options={servers.map((s) => ({ value: s.id, label: `${s.name}${cache[s.id]?.status === 'offline' ? ' · 离线' : ''}` }))}
+            options={servers.map((s) => ({ value: s.id, label: `${s.name}${offlineSuffix(cache[s.id])}` }))}
           />
           {offlineSelected.length > 0 && (
             <div style={{ color: '#d97706', fontSize: 12, background: 'rgba(217,119,6,0.08)', border: '1px solid rgba(217,119,6,0.3)', borderRadius: 8, padding: '6px 10px', marginTop: 8 }}>

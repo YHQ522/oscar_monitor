@@ -21,6 +21,10 @@ from .trend import TrendStore, get_trend_store
 
 logger = logging.getLogger("oscar_monitor.scheduler")
 
+# 重查询类别降频采集：这些查询对生产库开销大，无需每 60 秒全量执行
+_HEAVY_CATS = ("storage", "objects")
+_HEAVY_INTERVAL = 300.0  # 秒
+
 
 def _all_failed_error(result: dict[str, Any]) -> str:
     """采集结果全部检查项均失败时返回首个错误信息，否则返回空串。
@@ -67,6 +71,8 @@ class CollectScheduler:
         self._lock = threading.Lock()
         self._running: set[str] = set()
         self._running_lock = threading.Lock()
+        # 重类别（storage/objects）上次完整采集时间：降频采集用
+        self._heavy_ts: dict[str, float] = {}
 
     # ── 运行中标记（防止同一服务器并发重复采集） ──
     def _is_running(self, server_id: str) -> bool:
@@ -134,6 +140,7 @@ class CollectScheduler:
         self._persist_errors(server, result)
         self.trend.record(server.get("id"), result)
         self._maybe_notify(server, result)
+        self._note_heavy(server, server.get("enabled_categories") or [])
         return result
 
     def _mark_offline(self, server: dict[str, Any], error: str) -> None:
@@ -163,6 +170,12 @@ class CollectScheduler:
         except Exception:  # noqa: BLE001
             logger.exception("告警通知处理失败: %s", server.get("name"))
 
+    def _note_heavy(self, server: dict[str, Any], categories: list[str]) -> None:
+        """本次采集包含重类别时记录时间戳，供降频调度判断。"""
+        if any(c in _HEAVY_CATS for c in categories):
+            with self._running_lock:
+                self._heavy_ts[server.get("id", "")] = time.time()
+
     def collect_one_async(self, server: dict[str, Any]) -> None:
         self._mark_running(server.get("id", ""), True)
         self._collect_executor().submit(self._safe_collect, server)
@@ -179,15 +192,39 @@ class CollectScheduler:
         result = collect_all(server, categories or [], os_checks or [])
         self.cache.merge(server.get("id"), result)
         self._persist_errors(server, result)
+        merged = self.cache.get(server.get("id"))
+        if merged:
+            self.trend.record(server.get("id"), merged)
+        self._note_heavy(server, categories or [])
         return result
+
+    def _safe_partial(self, server: dict[str, Any], categories: list[str], os_checks: list[str]) -> None:
+        try:
+            self.collect_partial(server, categories, os_checks)
+        except Exception:  # noqa: BLE001
+            logger.exception("局部采集失败: %s", server.get("name"))
+        finally:
+            self._mark_running(server.get("id", ""), False)
 
     # ── 定时任务 ──
     def _auto_job(self) -> None:
+        now = time.time()
         for server in self.server_service.list():
             sid = server.get("id")
             if self.cache.fresh(sid, max_age=30) or self._is_running(sid):
                 continue
             try:
+                cats = list(server.get("enabled_categories") or [])
+                # 重类别未到期 → 本次跳过（局部采集其余类别，保留旧的重类别结果）
+                heavy_ok = now - self._heavy_ts.get(sid, 0) >= _HEAVY_INTERVAL
+                if any(c in _HEAVY_CATS for c in cats) and not heavy_ok:
+                    light = [c for c in cats if c not in _HEAVY_CATS]
+                    os_checks = list(server.get("enabled_os_checks") or [])
+                    if not light and not os_checks:
+                        continue
+                    self._mark_running(sid, True)
+                    self._collect_executor().submit(self._safe_partial, server, light, os_checks)
+                    continue
                 self.collect_one_async(server)
             except Exception:  # noqa: BLE001
                 logger.exception("提交采集任务失败: %s", server.get("name"))

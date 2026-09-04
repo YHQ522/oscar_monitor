@@ -79,27 +79,7 @@ body,
   box-shadow: 0 12px 28px rgba(99, 102, 241, 0.25);
 }
 
-/* 可点击的 IP 地址（跳转服务器详情页） */
-.ip-link {
-  cursor: pointer;
-  width: fit-content;
-  transition: color 0.15s ease;
-}
-.ip-link:hover {
-  color: #6366f1 !important;
-  text-decoration: underline;
-}
-
-/* 可点击的服务器名称（跳转服务器详情页） */
-.name-link {
-  cursor: pointer;
-  transition: color 0.15s ease;
-}
-.name-link:hover {
-  color: #6366f1 !important;
-}
-
-/* 可点击的文本（如 慢SQL/死锁） */
+/* 可点击文本/名称（跳转详情、慢SQL/死锁等），hover 紫色高亮 */
 .link-text {
   cursor: pointer;
   transition: color 0.15s ease;

@@ -7,6 +7,7 @@ import { PlayCircleOutlined, ReloadOutlined, StopOutlined, EyeOutlined } from '@
 import { api } from '../api/client'
 import { useServerCache } from '../hooks/useSSE'
 import { useAuth } from '../store/auth'
+import ServerStatusTag from '../components/ServerStatusTag'
 import type { Server } from '../api/types'
 
 interface ControlResp {
@@ -180,7 +181,7 @@ export default function ControlPage() {
                 <Tag color="purple">{s.db_type.toUpperCase()}</Tag>
                 <b>{s.name}</b>
                 <span style={{ color: '#8a94a6', fontSize: 12 }}>{s.ssh_host}</span>
-                {offline ? <Tag color="red">离线</Tag> : cache[s.id] ? <Tag color="green">在线</Tag> : <Tag>未采集</Tag>}
+                <ServerStatusTag data={cache[s.id]} />
               </Space>
               <Space wrap>
                 <ControlButton
@@ -213,7 +214,7 @@ export default function ControlPage() {
                   <Tag>{server.name}</Tag>
                   <b>{app.name}</b>
                   <span style={{ color: '#8a94a6', fontSize: 12 }}>端口 {app.port}</span>
-                  {offline ? <Tag color="red">离线</Tag> : cache[server.id] ? <Tag color="green">在线</Tag> : <Tag>未采集</Tag>}
+                  <ServerStatusTag data={cache[server.id]} />
                 </Space>
                 <Space wrap>
                   <ControlButton

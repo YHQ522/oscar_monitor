@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { useServerCache } from '../hooks/useSSE'
 import { useAuth } from '../store/auth'
+import ServerStatusTag from '../components/ServerStatusTag'
 import type { Server } from '../api/types'
 
 export default function ServersPage() {
@@ -88,11 +89,7 @@ export default function ServersPage() {
     {
       title: '状态',
       width: 90,
-      render: (_: unknown, r: Server) => {
-        const d = cache[r.id]
-        if (!d) return <Tag>未采集</Tag>
-        return d.status === 'offline' ? <Tag color="red">离线</Tag> : <Tag color="green">在线</Tag>
-      },
+      render: (_: unknown, r: Server) => <ServerStatusTag data={cache[r.id]} />,
     },
     { title: 'SSH 地址', render: (_: unknown, r: Server) => `${r.ssh_host}:${r.ssh_port}` },
     { title: '数据库地址', render: (_: unknown, r: Server) => (r.skip_db ? '—' : `${r.db_host}:${r.db_port}`) },

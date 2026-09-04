@@ -10,6 +10,7 @@ import sqlLang from 'react-syntax-highlighter/dist/esm/languages/prism/sql'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { api, ApiError } from '../api/client'
 import { useServerCache } from '../hooks/useSSE'
+import { offlineSuffix } from '../components/ServerStatusTag'
 import QueryTable from '../components/QueryTable'
 import type { Server, QueryResult } from '../api/types'
 
@@ -186,7 +187,7 @@ export default function SqlTerminalPage() {
             placeholder="选择服务器"
             value={serverId || undefined}
             onChange={setServerId}
-            options={servers.map((s) => ({ value: s.id, label: `${s.name} (${s.db_type})${cache[s.id]?.status === 'offline' ? ' · 离线' : ''}` }))}
+            options={servers.map((s) => ({ value: s.id, label: `${s.name} (${s.db_type})${offlineSuffix(cache[s.id])}` }))}
           />
           <Button type="primary" icon={<PlayCircleOutlined />} onClick={() => run()} loading={running}>
             执行 (Ctrl+Enter)
