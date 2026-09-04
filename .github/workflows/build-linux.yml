@@ -1,0 +1,40 @@
+name: build-linux
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'build/**'
+      - '.github/workflows/build-linux.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 安装 Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 打包 Linux 单文件二进制 + 自解压安装包
+        run: bash build/build_linux.sh
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: oscar-monitor-linux-x86_64
+          if-no-files-found: error
+          path: |
+            build/dist/oscar-monitor
+            build/dist/oscar-monitor-setup-2.0.0-linux-x86_64.sh
